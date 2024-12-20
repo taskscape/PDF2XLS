@@ -1,9 +1,15 @@
-﻿using System.Net.Http.Headers;
+﻿using System.ClientModel;
+using System.Diagnostics.CodeAnalysis;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Configuration;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using OpenAI;
+using OpenAI.Assistants;
+using OpenAI.Files;
 using Polly;
 using Polly.Retry;
 
@@ -11,6 +17,7 @@ namespace PDF2XLS;
 
 class Program
 {
+    [Experimental("OPENAI001")]
     static async Task Main(string[] args)
     {
         IConfiguration config = new ConfigurationBuilder()
@@ -21,6 +28,8 @@ class Program
         const string baseUrl = "https://www.nudelta.pl/api/v1";
         string username = config["NuDeltaCredentials:Username"] ?? "";
         string password = config["NuDeltaCredentials:Password"] ?? "";
+        string preferredApi = config["PreferredAPI"] ?? "";
+        string openAiApiKey = config["OpenAI_APIKey"] ?? "";
 
         if (args.Length < 1)
         {
@@ -53,7 +62,19 @@ class Program
         {
             outputDir = Environment.CurrentDirectory;
         }
+        string response;
+        try
+        {
+            response = await UploadPdfToChatGpt(inputFilePath, openAiApiKey);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error communicating with ChatGPT: " + ex.Message);
+            return;
+        }
+        Console.WriteLine(response);
 
+        return;
         string documentId = await UploadDocumentAsync(baseUrl, username, password, inputFilePath);
 
         if (string.IsNullOrEmpty(documentId))
@@ -332,5 +353,77 @@ class Program
             Console.WriteLine($"GetProcessedResultAsync error: {ex.Message}");
             return null;
         }
+    }
+
+
+    [Experimental("OPENAI001")]
+    private static async Task<string> UploadPdfToChatGpt(string filePath, string apiKey)
+    {
+        OpenAIClient client = new(apiKey);
+        
+        OpenAIFileClient? fileClient = client.GetOpenAIFileClient();
+        FileUploadPurpose uploadPurpose = FileUploadPurpose.Assistants;
+        string fileId;
+
+        await using (FileStream fileStream = File.OpenRead(filePath))
+        {
+            ClientResult<OpenAIFile>? uploadResult = await fileClient.UploadFileAsync(fileStream, Path.GetFileName(filePath), uploadPurpose);
+            fileId = uploadResult.Value.Id;
+            Console.WriteLine($"File uploaded successfully. File ID: {fileId}");
+        }
+
+        AssistantClient? assistantClient = client.GetAssistantClient();
+
+        ClientResult<Assistant>? assistant = await assistantClient.CreateAssistantAsync("gpt-4o-mini", new AssistantCreationOptions
+        {
+            Instructions = "You are supposed to analyze the PDFs given to you and provide the information about them that the user wants you to."
+        });
+
+        ClientResult<AssistantThread>? thread = await assistantClient.CreateThreadAsync();
+        
+        using HttpClient httpClient = new();
+        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+        httpClient.DefaultRequestHeaders.Add("OpenAI-Beta", "assistants=v2");
+
+        var requestData = new
+        {
+            role = "user",
+            content = "Provide the seller name.",
+            attachments = new[]
+            {
+                new
+                {
+                    file_id = fileId,
+                    tools = new[]
+                    {
+                        new
+                        {
+                            type = "file_search"
+                        }
+                    }
+                }
+            }
+        };
+
+        string endpoint = $"https://api.openai.com/v1/threads/{thread.Value.Id}/messages";
+
+        string json = JsonConvert.SerializeObject(requestData);
+        StringContent requestContent = new(json, Encoding.UTF8, "application/json");
+
+        HttpResponseMessage response = await httpClient.PostAsync(endpoint, requestContent);
+        response.EnsureSuccessStatusCode();
+        
+        ClientResult<ThreadRun>? run = await assistantClient.CreateRunAsync(thread.Value.Id, assistant.Value.Id);
+
+        Task<ClientResult<ThreadRun>>? retrievedRun = assistantClient.GetRunAsync(thread.Value.Id, run.Value.Id);
+        while (!retrievedRun.IsCompleted)
+        {
+            retrievedRun = assistantClient.GetRunAsync(thread.Value.Id, run.Value.Id);
+            Thread.Sleep(1000);
+        }
+        
+        List<ThreadMessage> messages = await assistantClient.GetMessagesAsync(thread.Value.Id).ToListAsync(); // TODO Check if there are at least two messages, if not, poll again until there are
+        ThreadMessage? actualAnswer = messages.FirstOrDefault(message => message.Role == MessageRole.Assistant);
+        return actualAnswer.Content[0].Text; // TODO Check if it starts to access the files, if not, read more about v2
     }
 }
