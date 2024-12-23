@@ -1,4 +1,4 @@
-﻿using System.ClientModel;
+using System.ClientModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Headers;
 using System.Text;
@@ -21,7 +21,7 @@ class Program
     static async Task Main(string[] args)
     {
         IConfiguration config = new ConfigurationBuilder()
-            .SetBasePath(AppContext.BaseDirectory)
+            .SetBasePath(Environment.CurrentDirectory)
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
             .Build();
         
@@ -34,6 +34,7 @@ class Program
         if (args.Length < 1)
         {
             Console.WriteLine("Usage: PDF2XLS <input file path> [output directory]");
+            Console.WriteLine("Press any key to exit...");
             Console.ReadKey();
             return;
         }
@@ -42,6 +43,7 @@ class Program
         if (!File.Exists(inputFilePath))
         {
             Console.WriteLine($"File {inputFilePath} does not exist");
+            Console.WriteLine("Press any key to exit...");
             Console.ReadKey();
             return;
         }
@@ -49,6 +51,7 @@ class Program
         if (!string.Equals(Path.GetExtension(inputFilePath), ".pdf", StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine($"File {inputFilePath} is not a PDF file");
+            Console.WriteLine("Press any key to exit...");
             Console.ReadKey();
             return;
         }

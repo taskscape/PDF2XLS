@@ -3,17 +3,18 @@
 This program lets you easily convert pdf invoices into excel spreadsheets by utilising NuDelta's API.
 The API is not perfect, always double check the output and fix errors manually.
 
-# Prerequisits:
+# Prerequisites:
 - NuDelta Invoice account
 
-# Configuration
+# Installation
 
+Download the latest release and unpack it to your destination folder.
 Inside `appsettings.json`, there are field which you need to fill in:
 
 - `Username`: Your NuDelta Invoice login username
 - `Password`: Your NuDelta Invoice login Password
 
-These are necessary for API communication.
+These fields are necessary for API communication.
 
 # Usage
 
