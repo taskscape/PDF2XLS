@@ -30,6 +30,7 @@ class Program
         string password = config["NuDeltaCredentials:Password"] ?? "";
         string preferredApi = config["PreferredAPI"] ?? "";
         string openAiApiKey = config["OpenAI_APIKey"] ?? "";
+        string responseSchema = await File.ReadAllTextAsync("schema.json");
 
         if (args.Length < 1)
         {
@@ -68,7 +69,7 @@ class Program
         string response;
         try
         {
-            response = await UploadPdfToChatGpt(inputFilePath, openAiApiKey);
+            response = await UploadPdfToChatGpt(inputFilePath, openAiApiKey, responseSchema);
         }
         catch (Exception ex)
         {
@@ -360,7 +361,7 @@ class Program
 
 
     [Experimental("OPENAI001")]
-    private static async Task<string> UploadPdfToChatGpt(string filePath, string apiKey)
+    private static async Task<string> UploadPdfToChatGpt(string filePath, string apiKey, string schema)
     {
         OpenAIClient client = new(apiKey);
         
@@ -379,7 +380,8 @@ class Program
 
         ClientResult<Assistant>? assistant = await assistantClient.CreateAssistantAsync("gpt-4o-mini", new AssistantCreationOptions
         {
-            Instructions = "You are supposed to analyze the PDFs given to you and provide the information about them that the user wants you to."
+            Instructions = $"You are supposed to analyze the PDFs given to you and always respond with ONLY the json object (without markdown codeblocks) filled in with information from the PDF, validated by a schema. Please be mindful of quotation marks in names that would invalidate the JSON and replace them accordingly. If information is missing in the PDF, leave the string empty. The schema: {schema}",
+            Tools = { new FileSearchToolDefinition() }
         });
 
         ClientResult<AssistantThread>? thread = await assistantClient.CreateThreadAsync();
@@ -391,7 +393,7 @@ class Program
         var requestData = new
         {
             role = "user",
-            content = "Provide the seller name.",
+            content = "Please analyze the file",
             attachments = new[]
             {
                 new
@@ -417,16 +419,50 @@ class Program
         response.EnsureSuccessStatusCode();
         
         ClientResult<ThreadRun>? run = await assistantClient.CreateRunAsync(thread.Value.Id, assistant.Value.Id);
-
-        Task<ClientResult<ThreadRun>>? retrievedRun = assistantClient.GetRunAsync(thread.Value.Id, run.Value.Id);
-        while (!retrievedRun.IsCompleted)
-        {
-            retrievedRun = assistantClient.GetRunAsync(thread.Value.Id, run.Value.Id);
-            Thread.Sleep(1000);
-        }
-        
-        List<ThreadMessage> messages = await assistantClient.GetMessagesAsync(thread.Value.Id).ToListAsync(); // TODO Check if there are at least two messages, if not, poll again until there are
+        List<ThreadMessage> messages = await GetMessagesWithRetryAsync(thread.Value.Id, run.Value.Id, assistantClient);
         ThreadMessage? actualAnswer = messages.FirstOrDefault(message => message.Role == MessageRole.Assistant);
-        return actualAnswer.Content[0].Text; // TODO Check if it starts to access the files, if not, read more about v2
+        
+        // TODO Remove files after an answer has been given
+        return actualAnswer.Content[0].Text ?? "Please try again.";
     }
+
+    [Experimental("OPENAI001")]
+    private static async Task<List<ThreadMessage>> GetMessagesWithRetryAsync(string threadId, string runId, AssistantClient assistantClient)
+    {
+        AsyncRetryPolicy? retryPolicy = Policy
+            .Handle<Exception>()
+            .WaitAndRetryAsync(
+                retryCount: 10,
+                sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(1.5),
+                onRetry: (exception, timeSpan, retryCount, context) =>
+                {
+                    //Console.WriteLine($"Retry {retryCount} after {timeSpan.Seconds} seconds due to {exception.Message}");
+                });
+
+        // Retrieve the run asynchronously
+        Task<ClientResult<ThreadRun>>? retrievedRun = assistantClient.GetRunAsync(threadId, runId);
+        await retryPolicy.ExecuteAsync(async () =>
+        {
+            if (retrievedRun == null || !retrievedRun.IsCompleted)
+            {
+                throw new Exception("Run is not completed yet.");
+            }
+        });
+
+        // Retrieve messages asynchronously
+        List<ThreadMessage> messages = [];
+        await retryPolicy.ExecuteAsync(async () =>
+        {
+            List<ThreadMessage> fetchedMessages = await assistantClient.GetMessagesAsync(threadId).ToListAsync();
+            messages = fetchedMessages.ToList();
+
+            if (messages.Count < 2 || messages[0].Content.Count == 0)
+            {
+                throw new Exception("Messages are incomplete.");
+            }
+        });
+
+        return messages;
+    }
+
 }

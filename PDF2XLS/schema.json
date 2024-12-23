@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "data": {
+      "type": "object",
+      "properties": {
+        "invn": { "type": "string" },
+        "issue": { "type": "string", "format": "date-time" },
+        "sale": { "type": "string", "format": "date-time" },
+        "payment": { "type": "string" },
+        "maturity": { "type": "string", "format": "date-time" },
+        "currency": { "type": "string" },
+        "total": { "type": "string" },
+        "paid": { "type": "string" },
+        "left": { "type": "string" },
+        "iban": { "type": "string" },
+        "seller": {
+          "type": "object",
+          "properties": {
+            "nip": { "type": "string" },
+            "name": { "type": "string" },
+            "city": { "type": "string" },
+            "street": { "type": "string" },
+            "zipcode": { "type": "string" }
+          }
+        },
+        "buyer": {
+          "type": "object",
+          "properties": {
+            "nip": { "type": "string" },
+            "name": { "type": "string" },
+            "city": { "type": "string" },
+            "street": { "type": "string" },
+            "zipcode": { "type": "string" }
+          }
+        },
+        "tables": {
+          "type": "object",
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "no": { "type": "string" },
+                  "name": { "type": "string" },
+                  "amount": { "type": "string" },
+                  "unit": { "type": "string" },
+                  "priceNetto": { "type": "string" },
+                  "vat": { "type": "string" },
+                  "valNetto": { "type": "string" },
+                  "valVat": { "type": "string" },
+                  "valBrutto": { "type": "string" }
+                }
+              }
+            },
+            "total": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "valNetto": { "type": "string" },
+                  "valVat": { "type": "string" },
+                  "valBrutto": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
