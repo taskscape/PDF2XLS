@@ -5,6 +5,8 @@
         <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+        <PublishTrimmed>false</PublishTrimmed>
     </PropertyGroup>
 
     <ItemGroup>
@@ -28,9 +30,9 @@
       <None Update="response.json">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
-      <None Update="schema.json">
-        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      </None>
+    </ItemGroup>
+    <ItemGroup>
+        <EmbeddedResource Include="schema.json"/>
     </ItemGroup>
 
 </Project>

@@ -1,11 +1,12 @@
 using System.ClientModel;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Configuration;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using OpenAI;
 using OpenAI.Assistants;
@@ -13,6 +14,7 @@ using OpenAI.Files;
 using Polly;
 using Polly.Retry;
 using Serilog;
+using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace PDF2XLS;
 
@@ -42,17 +44,27 @@ class Program
 
         try
         {
+            string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            string realExeDirectory = Path.GetDirectoryName(exePath);
             IConfiguration config = new ConfigurationBuilder()
-                .SetBasePath(Environment.CurrentDirectory)
+                .SetBasePath(realExeDirectory)
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                 .Build();
-
+            
+            Assembly assembly = Assembly.GetExecutingAssembly();
+            string resourceName = "PDF2XLS.schema.json";
+            string fileContents;
+            await using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+            using (StreamReader reader = new(stream))
+            {
+                fileContents = await reader.ReadToEndAsync();
+            }
+            
             Username = config["NuDeltaCredentials:Username"] ?? "";
             Password = config["NuDeltaCredentials:Password"] ?? "";
             PreferredApi = config["PreferredAPI"] ?? "";
             OpenAiApiKey = config["OpenAI_APIKey"] ?? "";
-            ResponseSchema = await File.ReadAllTextAsync("schema.json");
-
+            ResponseSchema = fileContents;
             if (args.Length < 1)
             {
                 Console.WriteLine("Usage: PDF2XLS <input file path> [output directory]");
@@ -470,29 +482,28 @@ class Program
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
         httpClient.DefaultRequestHeaders.Add("OpenAI-Beta", "assistants=v2");
 
-        var requestData = new
-        {
-            role = "user",
-            content = "Please analyze the file",
-            attachments = new[]
-            {
-                new
+        PromptRequestModel requestData = new()
+        { 
+            Role = "user", 
+            Content = "Please analyze the file",
+            Attachments =
+            [
+                new AttachmentModel
                 {
-                    file_id = fileId,
-                    tools = new[]
-                    {
-                        new
+                    FileId = fileId,
+                    Tools = [
+                        new ToolModel
                         {
-                            type = "file_search"
+                            Type = "file_search"
                         }
-                    }
+                    ]
                 }
-            }
+            ]
         };
-
+        
         string endpoint = $"https://api.openai.com/v1/threads/{thread.Value.Id}/messages";
+        string json = JsonSerializer.Serialize(requestData);
 
-        string json = JsonConvert.SerializeObject(requestData);
         StringContent requestContent = new(json, Encoding.UTF8, "application/json");
 
         HttpResponseMessage response = await httpClient.PostAsync(endpoint, requestContent);
