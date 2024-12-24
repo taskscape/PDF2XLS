@@ -30,10 +30,12 @@ class Program
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
     {
+        string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
+        string realExeDirectory = Path.GetDirectoryName(exePath);
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .WriteTo.File(
-                path: "logs/log-.txt",
+                path: $"{realExeDirectory}/logs/log-.txt",
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 7,
                 outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
@@ -44,8 +46,7 @@ class Program
 
         try
         {
-            string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
-            string realExeDirectory = Path.GetDirectoryName(exePath);
+            
             IConfiguration config = new ConfigurationBuilder()
                 .SetBasePath(realExeDirectory)
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
