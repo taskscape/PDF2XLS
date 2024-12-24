@@ -17,6 +17,13 @@ namespace PDF2XLS;
 
 class Program
 {
+    private static string Username { get; set; }
+    private static string Password { get; set; }
+    private static string PreferredApi { get; set; }
+    private static string OpenAiApiKey { get; set; }
+    private static string ResponseSchema { get; set; }
+    private static string NuDeltaBaseUrl = "https://www.nudelta.pl/api/v1";
+
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
     {
@@ -25,12 +32,11 @@ class Program
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
             .Build();
         
-        const string baseUrl = "https://www.nudelta.pl/api/v1";
-        string username = config["NuDeltaCredentials:Username"] ?? "";
-        string password = config["NuDeltaCredentials:Password"] ?? "";
-        string preferredApi = config["PreferredAPI"] ?? "";
-        string openAiApiKey = config["OpenAI_APIKey"] ?? "";
-        string responseSchema = await File.ReadAllTextAsync("schema.json");
+        Username = config["NuDeltaCredentials:Username"] ?? "";
+        Password = config["NuDeltaCredentials:Password"] ?? "";
+        PreferredApi = config["PreferredAPI"] ?? "";
+        OpenAiApiKey = config["OpenAI_APIKey"] ?? "";
+        ResponseSchema = await File.ReadAllTextAsync("schema.json");
 
         if (args.Length < 1)
         {
@@ -56,197 +62,192 @@ class Program
             Console.ReadKey();
             return;
         }
-            
-        string outputDir;
-        if (args.Length >= 2)
-        {
-            outputDir = args[1];
-        }
-        else
-        {
-            outputDir = Environment.CurrentDirectory;
-        }
-        string response;
+
+        string outputDir = args.Length >= 2 ? args[1] : Environment.CurrentDirectory;
+        
         try
         {
-            response = await UploadPdfToChatGpt(inputFilePath, openAiApiKey, responseSchema);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine("Error communicating with ChatGPT: " + ex.Message);
-            return;
-        }
-        Console.WriteLine(response);
-
-        return;
-        string documentId = await UploadDocumentAsync(baseUrl, username, password, inputFilePath);
-
-        if (string.IsNullOrEmpty(documentId))
-        {
-            Console.WriteLine("Document upload failed. No Document ID received.");
-            return;
-        }
+            AsyncRetryPolicy? retryPolicy = Policy
+                .Handle<Exception>()
+                .WaitAndRetryAsync(
+                    retryCount: 3,
+                    sleepDurationProvider: attempt => TimeSpan.FromSeconds(1),
+                    onRetry: (exception, timeSpan, retryCount, context) =>
+                    {
+                        Console.WriteLine($"Retry {retryCount} after {timeSpan.TotalSeconds}s due to: {exception.Message}");
+                    }
+                );
             
-        Console.WriteLine($"Successfully uploaded. Document ID: {documentId}");
-        string processedJson = await GetProcessedResultAsync(baseUrl, username, password, documentId);
-        JsonNode root = JsonNode.Parse(processedJson);
-        JsonNode? dataNode = root?["data"];
+            JsonNode root = null;
+            await retryPolicy.ExecuteAsync(async () =>
+            {
+                string response = await GetJsonResponse(inputFilePath);
+                root = JsonNode.Parse(response);
+            });
+            JsonNode? dataNode = root?["data"];
 
-        // Extract top-level fields
-        string invNumber = GetValFromNode(dataNode?["invn"]);
-        string issueDate = GetValFromNode(dataNode?["issue"]);
-        string saleDate = GetValFromNode(dataNode?["sale"]);
-        string paymentMethod = GetValFromNode(dataNode?["payment"]);
-        string maturity = GetValFromNode(dataNode?["maturity"]);
-        string currency = GetValFromNode(dataNode?["currency"]);
-        string totalAmount = GetValFromNode(dataNode?["total"]);
-        string paidAmount = GetValFromNode(dataNode?["paid"]);
-        string leftToPay = GetValFromNode(dataNode?["left"]);
-        string iban = GetValFromNode(dataNode?["iban"]);
+            // Extract top-level fields
+            string invNumber = GetValFromNode(dataNode?["invn"]);
+            string issueDate = GetValFromNode(dataNode?["issue"]);
+            string saleDate = GetValFromNode(dataNode?["sale"]);
+            string paymentMethod = GetValFromNode(dataNode?["payment"]);
+            string maturity = GetValFromNode(dataNode?["maturity"]);
+            string currency = GetValFromNode(dataNode?["currency"]);
+            string totalAmount = GetValFromNode(dataNode?["total"]);
+            string paidAmount = GetValFromNode(dataNode?["paid"]);
+            string leftToPay = GetValFromNode(dataNode?["left"]);
+            string iban = GetValFromNode(dataNode?["iban"]);
 
-        // Seller info
-        JsonNode? seller = dataNode?["seller"];
-        string sellerNip = GetValFromNode(seller?["nip"]);
-        string sellerName = GetValFromNode(seller?["name"]);
-        string sellerCity = GetValFromNode(seller?["city"]);
-        string sellerStreet = GetValFromNode(seller?["street"]);
-        string sellerZip = GetValFromNode(seller?["zipcode"]);
+            // Seller info
+            JsonNode? seller = dataNode?["seller"];
+            string sellerNip = GetValFromNode(seller?["nip"]);
+            string sellerName = GetValFromNode(seller?["name"]);
+            string sellerCity = GetValFromNode(seller?["city"]);
+            string sellerStreet = GetValFromNode(seller?["street"]);
+            string sellerZip = GetValFromNode(seller?["zipcode"]);
 
-        // Buyer info
-        JsonNode? buyer = dataNode?["buyer"];
-        string buyerNip = GetValFromNode(buyer?["nip"]);
-        string buyerName = GetValFromNode(buyer?["name"]);
-        string buyerCity = GetValFromNode(buyer?["city"]);
-        string buyerStreet = GetValFromNode(buyer?["street"]);
-        string buyerZip = GetValFromNode(buyer?["zipcode"]);
+            // Buyer info
+            JsonNode? buyer = dataNode?["buyer"];
+            string buyerNip = GetValFromNode(buyer?["nip"]);
+            string buyerName = GetValFromNode(buyer?["name"]);
+            string buyerCity = GetValFromNode(buyer?["city"]);
+            string buyerStreet = GetValFromNode(buyer?["street"]);
+            string buyerZip = GetValFromNode(buyer?["zipcode"]);
 
-        // Table rows
-        JsonNode? tablesNode = dataNode?["tables"];
-        JsonArray rows = tablesNode?["rows"]?.AsArray() ?? [];
-        JsonArray totals = tablesNode?["total"]?.AsArray() ?? [];
-            
-        string fileNameNoExt = Path.GetFileNameWithoutExtension(inputFilePath);
-        string outputPath = Path.Combine(outputDir, fileNameNoExt + ".xlsx");
+            // Table rows
+            JsonNode? tablesNode = dataNode?["tables"];
+            JsonArray rows = tablesNode?["rows"]?.AsArray() ?? [];
+            JsonArray totals = tablesNode?["total"]?.AsArray() ?? [];
+                
+            string fileNameNoExt = Path.GetFileNameWithoutExtension(inputFilePath);
+            string outputPath = Path.Combine(outputDir, fileNameNoExt + ".xlsx");
 
-        using XLWorkbook wb = new();
-        IXLWorksheet ws = wb.Worksheets.Add("Faktura");
+            using XLWorkbook wb = new();
+            IXLWorksheet ws = wb.Worksheets.Add("Faktura");
 
-        // Styles
-        IXLStyle? headerStyle = wb.Style;
-        headerStyle.Font.Bold = true;
-        headerStyle.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-        headerStyle.Fill.BackgroundColor = XLColor.LightGray;
-        headerStyle.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            // Styles
+            IXLStyle? headerStyle = wb.Style;
+            headerStyle.Font.Bold = true;
+            headerStyle.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            headerStyle.Fill.BackgroundColor = XLColor.LightGray;
+            headerStyle.Border.OutsideBorder = XLBorderStyleValues.Thin;
 
-        // Invoice Header
-        ws.Cell("A1").Value = "Faktura";
-        ws.Range("A1:B1").Merge().Style.Font.Bold = true;
-        ws.Row(1).Height = 20;
+            // Invoice Header
+            ws.Cell("A1").Value = "Faktura";
+            ws.Range("A1:B1").Merge().Style.Font.Bold = true;
+            ws.Row(1).Height = 20;
 
-        ws.Cell("A3").Value = "Numer faktury:";
-        ws.Cell("B3").Value = invNumber;
-        ws.Cell("A4").Value = "Data wystawienia:";
-        ws.Cell("B4").Value = issueDate;
-        ws.Cell("A5").Value = "Data sprzedaży:";
-        ws.Cell("B5").Value = saleDate;
-        ws.Cell("A6").Value = "Termin zapłaty:";
-        ws.Cell("B6").Value = maturity;
-        ws.Cell("A7").Value = "Forma zapłaty:";
-        ws.Cell("B7").Value = paymentMethod;
-        ws.Cell("A8").Value = "Waluta:";
-        ws.Cell("B8").Value = currency;
+            ws.Cell("A3").Value = "Numer faktury:";
+            ws.Cell("B3").Value = invNumber;
+            ws.Cell("A4").Value = "Data wystawienia:";
+            ws.Cell("B4").Value = issueDate;
+            ws.Cell("A5").Value = "Data sprzedaży:";
+            ws.Cell("B5").Value = saleDate;
+            ws.Cell("A6").Value = "Termin zapłaty:";
+            ws.Cell("B6").Value = maturity;
+            ws.Cell("A7").Value = "Forma zapłaty:";
+            ws.Cell("B7").Value = paymentMethod;
+            ws.Cell("A8").Value = "Waluta:";
+            ws.Cell("B8").Value = currency;
 
-        // Seller & Buyer
-        ws.Cell("D3").Value = "Sprzedawca";
-        ws.Cell("D3").Style.Font.Bold = true;
-        ws.Cell("D4").Value = $"NIP: {sellerNip}";
-        ws.Cell("D5").Value = sellerName;
-        ws.Cell("D6").Value = sellerStreet;
-        ws.Cell("D7").Value = $"{sellerZip} {sellerCity}";
+            // Seller & Buyer
+            ws.Cell("D3").Value = "Sprzedawca";
+            ws.Cell("D3").Style.Font.Bold = true;
+            ws.Cell("D4").Value = $"NIP: {sellerNip}";
+            ws.Cell("D5").Value = sellerName;
+            ws.Cell("D6").Value = sellerStreet;
+            ws.Cell("D7").Value = $"{sellerZip} {sellerCity}";
 
-        ws.Cell("F3").Value = "Kupujący";
-        ws.Cell("F3").Style.Font.Bold = true;
-        ws.Cell("F4").Value = $"NIP: {buyerNip}";
-        ws.Cell("F5").Value = buyerName;
-        ws.Cell("F6").Value = buyerStreet;
-        ws.Cell("F7").Value = $"{buyerZip} {buyerCity}";
+            ws.Cell("F3").Value = "Kupujący";
+            ws.Cell("F3").Style.Font.Bold = true;
+            ws.Cell("F4").Value = $"NIP: {buyerNip}";
+            ws.Cell("F5").Value = buyerName;
+            ws.Cell("F6").Value = buyerStreet;
+            ws.Cell("F7").Value = $"{buyerZip} {buyerCity}";
 
-        // Line Items Table
-        int startRow = 10;
-        ws.Cell(startRow, 1).Value = "lp";
-        ws.Cell(startRow, 2).Value = "Nazwa towaru lub usługi";
-        ws.Cell(startRow, 3).Value = "Ilość";
-        ws.Cell(startRow, 4).Value = "Jm";
-        ws.Cell(startRow, 5).Value = "Cena netto";
-        ws.Cell(startRow, 6).Value = "Stawka VAT %";
-        ws.Cell(startRow, 7).Value = "Wartość Netto";
-        ws.Cell(startRow, 8).Value = "Wartość VAT";
-        ws.Cell(startRow, 9).Value = "Wartość Brutto";
+            // Line Items Table
+            int startRow = 10;
+            ws.Cell(startRow, 1).Value = "lp";
+            ws.Cell(startRow, 2).Value = "Nazwa towaru lub usługi";
+            ws.Cell(startRow, 3).Value = "Ilość";
+            ws.Cell(startRow, 4).Value = "Jm";
+            ws.Cell(startRow, 5).Value = "Cena netto";
+            ws.Cell(startRow, 6).Value = "Stawka VAT %";
+            ws.Cell(startRow, 7).Value = "Wartość Netto";
+            ws.Cell(startRow, 8).Value = "Wartość VAT";
+            ws.Cell(startRow, 9).Value = "Wartość Brutto";
 
-        ws.Range(startRow, 1, startRow, 9).Style = headerStyle;
+            ws.Range(startRow, 1, startRow, 9).Style = headerStyle;
 
-        int currentRow = startRow + 1;
-        int lastItemRow = currentRow;
-        foreach (JsonNode? r in rows)
-        {
-            lastItemRow = currentRow;
-            string noVal = GetValFromNode(r?["no"]);
-            string nameVal = GetValFromNode(r?["name"]);
-            string amountVal = GetValFromNode(r?["amount"]);
-            string unitVal = GetValFromNode(r?["unit"]);
-            string priceNettoVal = GetValFromNode(r?["priceNetto"]);
-            string vatVal = GetValFromNode(r?["vat"]);
-            string valNettoVal = GetValFromNode(r?["valNetto"]);
-            string valVatVal = GetValFromNode(r?["valVat"]);
-            string valBruttoVal = GetValFromNode(r?["valBrutto"]);
+            int currentRow = startRow + 1;
+            int lastItemRow = currentRow;
+            foreach (JsonNode? r in rows)
+            {
+                lastItemRow = currentRow;
+                string noVal = GetValFromNode(r?["no"]);
+                string nameVal = GetValFromNode(r?["name"]);
+                string amountVal = GetValFromNode(r?["amount"]);
+                string unitVal = GetValFromNode(r?["unit"]);
+                string priceNettoVal = GetValFromNode(r?["priceNetto"]);
+                string vatVal = GetValFromNode(r?["vat"]);
+                string valNettoVal = GetValFromNode(r?["valNetto"]);
+                string valVatVal = GetValFromNode(r?["valVat"]);
+                string valBruttoVal = GetValFromNode(r?["valBrutto"]);
 
-            ws.Cell(currentRow, 1).Value = noVal;
-            ws.Cell(currentRow, 2).Value = nameVal;
-            ws.Cell(currentRow, 3).Value = amountVal;
-            ws.Cell(currentRow, 4).Value = unitVal;
-            ws.Cell(currentRow, 5).Value = priceNettoVal;
-            ws.Cell(currentRow, 6).Value = vatVal;
-            ws.Cell(currentRow, 7).Value = valNettoVal;
-            ws.Cell(currentRow, 8).Value = valVatVal;
-            ws.Cell(currentRow, 9).Value = valBruttoVal;
+                ws.Cell(currentRow, 1).Value = noVal;
+                ws.Cell(currentRow, 2).Value = nameVal;
+                ws.Cell(currentRow, 3).Value = amountVal;
+                ws.Cell(currentRow, 4).Value = unitVal;
+                ws.Cell(currentRow, 5).Value = priceNettoVal;
+                ws.Cell(currentRow, 6).Value = vatVal;
+                ws.Cell(currentRow, 7).Value = valNettoVal;
+                ws.Cell(currentRow, 8).Value = valVatVal;
+                ws.Cell(currentRow, 9).Value = valBruttoVal;
 
+                currentRow++;
+            }
+
+            // Totals Section
+            currentRow += 1;
+            JsonNode? totalNode = totals.Count > 0 ? totals[0] : null;
+            string totalNetto = GetValFromNode(totalNode?["valNetto"]);
+            string totalVat = GetValFromNode(totalNode?["valVat"]);
+            string totalBrutto = GetValFromNode(totalNode?["valBrutto"]);
+
+            ws.Cell(currentRow, 8).Value = "Netto Razem:";
+            ws.Cell(currentRow, 9).Value = totalNetto;
+            ws.Cell(currentRow, 1).Value = "IBAN:";
+            ws.Cell(currentRow, 2).Value = iban;
             currentRow++;
+            ws.Cell(currentRow, 8).Value = "VAT Razem:";
+            ws.Cell(currentRow, 9).Value = totalVat;
+            ws.Cell(currentRow, 1).Value = "Zaliczka otrzymana:";
+            ws.Cell(currentRow, 2).Value = paidAmount;
+            currentRow++;
+            ws.Cell(currentRow, 8).Value = "Brutto Razem:";
+            ws.Cell(currentRow, 9).Value = totalBrutto;
+            ws.Cell(currentRow, 1).Value = "Do zapłaty:";
+            ws.Cell(currentRow, 2).Value = leftToPay;
+
+            // Formatting
+            ws.Columns().AdjustToContents();
+            ws.Range("A3:A9").Style.Font.Bold = true;
+            ws.Range("A3:A9").Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+            ws.Range("D3").Style.Font.Bold = true;
+            ws.Range("F3").Style.Font.Bold = true;
+            ws.Range(startRow, 1, lastItemRow, 9).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            ws.Range(startRow, 1, lastItemRow, 9).Style.Border.InsideBorder = XLBorderStyleValues.Hair;
+                
+            wb.SaveAs(outputPath);
+
+            Console.WriteLine($"Excel file saved to: {outputPath}");
         }
-
-        // Totals Section
-        currentRow += 1;
-        JsonNode? totalNode = totals.Count > 0 ? totals[0] : null;
-        string totalNetto = GetValFromNode(totalNode?["valNetto"]);
-        string totalVat = GetValFromNode(totalNode?["valVat"]);
-        string totalBrutto = GetValFromNode(totalNode?["valBrutto"]);
-
-        ws.Cell(currentRow, 8).Value = "Netto Razem:";
-        ws.Cell(currentRow, 9).Value = totalNetto;
-        ws.Cell(currentRow, 1).Value = "IBAN:";
-        ws.Cell(currentRow, 2).Value = iban;
-        currentRow++;
-        ws.Cell(currentRow, 8).Value = "VAT Razem:";
-        ws.Cell(currentRow, 9).Value = totalVat;
-        ws.Cell(currentRow, 1).Value = "Zaliczka otrzymana:";
-        ws.Cell(currentRow, 2).Value = paidAmount;
-        currentRow++;
-        ws.Cell(currentRow, 8).Value = "Brutto Razem:";
-        ws.Cell(currentRow, 9).Value = totalBrutto;
-        ws.Cell(currentRow, 1).Value = "Do zapłaty:";
-        ws.Cell(currentRow, 2).Value = leftToPay;
-
-        // Formatting
-        ws.Columns().AdjustToContents();
-        ws.Range("A3:A9").Style.Font.Bold = true;
-        ws.Range("A3:A9").Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-        ws.Range("D3").Style.Font.Bold = true;
-        ws.Range("F3").Style.Font.Bold = true;
-        ws.Range(startRow, 1, lastItemRow, 9).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-        ws.Range(startRow, 1, lastItemRow, 9).Style.Border.InsideBorder = XLBorderStyleValues.Hair;
-            
-        wb.SaveAs(outputPath);
-
-        Console.WriteLine($"Excel file saved to: {outputPath}");
+        catch (Exception e)
+        {
+            Console.WriteLine("There was an error while parsing the response, please try again.");
+            throw;
+        }
+        
     }
     
     /// <summary>
@@ -269,6 +270,40 @@ class Program
         }
                 
         return node.ToString();
+    }
+
+    [Experimental("OPENAI001")]
+    private static async Task<string> GetJsonResponse(string inputFilePath)
+    {
+        try
+        {
+            string response = PreferredApi switch
+            {
+                "NuDelta" => await UploadPdfToNuDelta(NuDeltaBaseUrl, Username, Password, inputFilePath),
+                "OpenAI" => await UploadPdfToChatGpt(inputFilePath, OpenAiApiKey, ResponseSchema),
+                _ => await UploadPdfToChatGpt(inputFilePath, OpenAiApiKey, ResponseSchema)
+            };
+            return response;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error communicating with {PreferredApi}: " + ex.Message);
+            return string.Empty;
+        }
+    }
+
+    private static async Task<string> UploadPdfToNuDelta(string baseUrl, string username, string password, string inputFilePath)
+    {
+        string documentId = await UploadDocumentAsync(baseUrl, username, password, inputFilePath);
+
+        if (string.IsNullOrEmpty(documentId))
+        {
+            Console.WriteLine("Document upload failed. No Document ID received.");
+            return string.Empty;
+        }
+            
+        Console.WriteLine($"File uploaded successfully. File ID: {documentId}");
+        return await GetProcessedResultAsync(baseUrl, username, password, documentId);
     }
         
     /// <summary>
@@ -339,7 +374,7 @@ class Program
             string authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{username}:{password}"));
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", authToken);
 
-            string resultUrl = $"{baseUrl}/documents/{documentId}";
+            string resultUrl = $"{baseUrl}/documents/{documentId}?compact-response=true";
             
             Console.WriteLine("Waiting for result");
             string resultJson = await retryPolicy.ExecuteAsync(async () =>
@@ -349,7 +384,7 @@ class Program
                 
                 return await response.Content.ReadAsStringAsync();
             });
-
+            
             return resultJson;
         }
         catch (Exception ex)
@@ -368,19 +403,20 @@ class Program
         OpenAIFileClient? fileClient = client.GetOpenAIFileClient();
         FileUploadPurpose uploadPurpose = FileUploadPurpose.Assistants;
         string fileId;
-
+        
         await using (FileStream fileStream = File.OpenRead(filePath))
         {
             ClientResult<OpenAIFile>? uploadResult = await fileClient.UploadFileAsync(fileStream, Path.GetFileName(filePath), uploadPurpose);
             fileId = uploadResult.Value.Id;
             Console.WriteLine($"File uploaded successfully. File ID: {fileId}");
         }
+        Console.WriteLine("Waiting for result");
 
         AssistantClient? assistantClient = client.GetAssistantClient();
 
         ClientResult<Assistant>? assistant = await assistantClient.CreateAssistantAsync("gpt-4o-mini", new AssistantCreationOptions
         {
-            Instructions = $"You are supposed to analyze the PDFs given to you and always respond with ONLY the json object (without markdown codeblocks) filled in with information from the PDF, validated by a schema. Please be mindful of quotation marks in names that would invalidate the JSON and replace them accordingly. If information is missing in the PDF, leave the string empty. The schema: {schema}",
+            Instructions = $"You are supposed to analyze the PDFs given to you and always respond with ONLY a valid json object (without markdown codeblocks) filled in with information from the PDF, validated by a schema. Remove quotation marks in names. If information is missing in the PDF, leave the string empty. The schema: {schema}",
             Tools = { new FileSearchToolDefinition() }
         });
 
@@ -420,10 +456,14 @@ class Program
         
         ClientResult<ThreadRun>? run = await assistantClient.CreateRunAsync(thread.Value.Id, assistant.Value.Id);
         List<ThreadMessage> messages = await GetMessagesWithRetryAsync(thread.Value.Id, run.Value.Id, assistantClient);
-        ThreadMessage? actualAnswer = messages.FirstOrDefault(message => message.Role == MessageRole.Assistant);
+        string actualAnswer = messages.FirstOrDefault(message => message.Role == MessageRole.Assistant).Content[0].Text ?? "Please try again.";
         
-        // TODO Remove files after an answer has been given
-        return actualAnswer.Content[0].Text ?? "Please try again.";
+        // Cleanup
+        await fileClient.DeleteFileAsync(fileId);
+        await assistantClient.DeleteThreadAsync(thread.Value.Id);
+        await assistantClient.DeleteAssistantAsync(assistant.Value.Id);
+        
+        return actualAnswer;
     }
 
     [Experimental("OPENAI001")]
@@ -464,5 +504,4 @@ class Program
 
         return messages;
     }
-
 }
