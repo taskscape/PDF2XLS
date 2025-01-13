@@ -1,11 +1,13 @@
 # PDF2XLS
 
 This program lets you easily convert pdf invoices into excel spreadsheets by utilising NuDelta or OpenAI's API.
+It also appends a row in a specified Google Spreadsheet.
 The APIs are not perfect, always double check the output and fix errors manually.
 
 # Prerequisites:
 - NuDelta Invoice account
 - OpenAI Token with balance
+- Google Service Account file in json format
 
 # Installation
 
@@ -16,6 +18,10 @@ Inside `appsettings.json`, there are field which you need to fill in:
 - `Password`: Your NuDelta Invoice login Password.
 - `PreferredAPI`: The API that you want to use. It can either be `NuDelta` or `OpenAI`.
 - `OpenAI_APIKey`: Your OpenAI API token.
+- `ServiceAccountFile`: Path to your Google Service Account json file.
+- `SpreadsheetId`: ID of your Google Spreadsheet. You can find it by going into your spreadsheet in a browser and copying it from the URL (it comes after /spreadsheets/d/).
+- `SheetName`: Name of your spreadsheet sheet.
+- `ApplicationName`: Name of your Google Sheets API Service Account (Not email).
 
 These fields are necessary for API communication.
 

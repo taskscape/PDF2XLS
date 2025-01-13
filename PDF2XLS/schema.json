@@ -6,6 +6,7 @@
       "type": "object",
       "properties": {
         "invn": { "type": "string" },
+        "reference": { "type": "string" },
         "issue": { "type": "string", "format": "date-time" },
         "sale": { "type": "string", "format": "date-time" },
         "payment": { "type": "string" },

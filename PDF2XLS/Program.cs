@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
 using ClosedXML.Excel;
+using Google.Apis.Sheets.v4;
 using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json.Linq;
 using OpenAI;
@@ -121,8 +122,13 @@ class Program
 
                 // Extract top-level fields
                 string invNumber = GetValFromNode(dataNode?["invn"]);
-                string issueDate = GetValFromNode(dataNode?["issue"]);
-                string saleDate = GetValFromNode(dataNode?["sale"]);
+                string refNumber = GetValFromNode(dataNode?["reference"]);
+                string issueDateString = GetValFromNode(dataNode?["issue"]);
+                DateTime.TryParse(issueDateString, out DateTime issueDate);
+                issueDateString = issueDate.ToString("yyyy-MM-dd");
+                string saleDateString = GetValFromNode(dataNode?["sale"]);
+                DateTime.TryParse(saleDateString, out DateTime saleDate);
+                saleDateString = saleDate.ToString("yyyy-MM-dd");
                 string paymentMethod = GetValFromNode(dataNode?["payment"]);
                 string maturity = GetValFromNode(dataNode?["maturity"]);
                 string currency = GetValFromNode(dataNode?["currency"]);
@@ -173,9 +179,9 @@ class Program
                 ws.Cell("A3").Value = "Numer faktury:";
                 ws.Cell("B3").Value = invNumber;
                 ws.Cell("A4").Value = "Data wystawienia:";
-                ws.Cell("B4").Value = issueDate;
+                ws.Cell("B4").Value = issueDateString;
                 ws.Cell("A5").Value = "Data sprzedaży:";
-                ws.Cell("B5").Value = saleDate;
+                ws.Cell("B5").Value = saleDateString;
                 ws.Cell("A6").Value = "Termin zapłaty:";
                 ws.Cell("B6").Value = maturity;
                 ws.Cell("A7").Value = "Forma zapłaty:";
@@ -275,6 +281,10 @@ class Program
 
                 Console.WriteLine($"Excel file saved to: {outputPath}");
                 Log.Information("Excel file saved successfully to {OutputPath}", outputPath);
+
+                GSheets sheets = new GSheets(config);
+                SheetsService sheetsService = sheets.CreateSheetsService();
+                sheets.AddRow(sheetsService, issueDateString, refNumber, sellerName, invNumber, totalAmount, leftToPay, currency);
             }
             catch (Exception e)
             {
@@ -530,7 +540,7 @@ class Program
             .Handle<Exception>()
             .WaitAndRetryAsync(
                 retryCount: 10,
-                sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(1.5),
+                sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
                 onRetry: (exception, timeSpan, retryCount, context) =>
                 {
                     Log.Warning(exception, "Retry {RetryCount} after {TimespanSeconds} seconds while fetching messages", 
