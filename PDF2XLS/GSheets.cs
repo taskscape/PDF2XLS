@@ -47,13 +47,28 @@ public class GSheets
                 invoiceDate, sellerName, invoiceNumber, reference, "", "", priceInPln, priceToPay, originalCurrency, "", "", ""
             ];
             
-            SpreadsheetsResource.ValuesResource.AppendRequest? request = sheetsService.Spreadsheets.Values.Append(new ValueRange
+            ValueRange valueRange = new ValueRange
             {
                 Values = new List<IList<object>> { row }
-            }, _spreadsheetId, $"{_sheetName}!A:A");
-            request.ValueInputOption = SpreadsheetsResource.ValuesResource.AppendRequest.ValueInputOptionEnum.USERENTERED;
+            };
+            
+            SpreadsheetsResource.ValuesResource.AppendRequest request =
+                sheetsService.Spreadsheets.Values.Append(
+                    valueRange,
+                    _spreadsheetId,
+                    $"{_sheetName}!A:A"
+                );
+            
+            request.ValueInputOption = SpreadsheetsResource.ValuesResource
+                .AppendRequest
+                .ValueInputOptionEnum.USERENTERED;
+            
+            request.InsertDataOption = SpreadsheetsResource.ValuesResource
+                .AppendRequest
+                .InsertDataOptionEnum.INSERTROWS;
+            
             request.Execute();
-
+        
             Console.WriteLine("Data appended to Google Sheet successfully!");
         }
         catch (Exception ex)
