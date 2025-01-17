@@ -52,12 +52,11 @@ public class GSheets
                 Values = new List<IList<object>> { row }
             };
             
-            SpreadsheetsResource.ValuesResource.AppendRequest request =
-                sheetsService.Spreadsheets.Values.Append(
-                    valueRange,
-                    _spreadsheetId,
-                    $"{_sheetName}!A:A"
-                );
+            SpreadsheetsResource.ValuesResource.AppendRequest? request = sheetsService.Spreadsheets.Values.Append(
+                valueRange,
+                _spreadsheetId,
+                _sheetName
+            );
             
             request.ValueInputOption = SpreadsheetsResource.ValuesResource
                 .AppendRequest
