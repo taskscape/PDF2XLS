@@ -27,6 +27,7 @@ class Program
     private static string OpenAiApiKey { get; set; }
     private static string ResponseSchema { get; set; }
     private static string NuDeltaBaseUrl = "https://www.nudelta.pl/api/v1";
+    private static bool DeleteAfter { get; set; }
 
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
@@ -67,6 +68,7 @@ class Program
             PreferredApi = config["PreferredAPI"] ?? "";
             OpenAiApiKey = config["OpenAI_APIKey"] ?? "";
             ResponseSchema = fileContents;
+            DeleteAfter = bool.Parse(config["DeleteFileAfterProcessing"]);
             if (args.Length < 1)
             {
                 Console.WriteLine("Usage: PDF2XLS <input file path> [output directory]");
@@ -80,8 +82,6 @@ class Program
             {
                 Console.WriteLine($"File {inputFilePath} does not exist");
                 Log.Error("File {InputFilePath} does not exist", inputFilePath);
-                Console.WriteLine("Press any key to exit...");
-                Console.ReadKey();
                 return;
             }
 
@@ -89,8 +89,6 @@ class Program
             {
                 Console.WriteLine($"File {inputFilePath} is not a PDF file");
                 Log.Error("File {InputFilePath} is not a PDF file", inputFilePath);
-                Console.WriteLine("Press any key to exit...");
-                Console.ReadKey();
                 return;
             }
 
@@ -117,6 +115,14 @@ class Program
                 {
                     string response = await GetJsonResponse(inputFilePath);
                     root = JsonNode.Parse(response);
+                    try
+                    {
+                        string.IsNullOrEmpty(root?["data"]["issue"].ToString());
+                    }
+                    catch (Exception)
+                    {
+                        throw new Exception("JSON response is empty");
+                    }
                 });
                 JsonNode? dataNode = root?["data"];
 
@@ -285,6 +291,17 @@ class Program
                 GSheets sheets = new GSheets(config);
                 SheetsService sheetsService = sheets.CreateSheetsService();
                 sheets.AddRow(sheetsService, issueDateString, refNumber, sellerName, invNumber, totalAmount, leftToPay, currency);
+                
+                if (DeleteAfter)
+                {
+                    File.Delete(inputFilePath);
+                }
+                else
+                {
+                    File.Move(inputFilePath, Path.Combine(
+                        Path.GetDirectoryName(inputFilePath),
+                        $"{DateTime.UtcNow:yyyyMMdd HHmm}_{Path.GetFileName(inputFilePath)}.bak"));
+                }
             }
             catch (Exception e)
             {
@@ -296,8 +313,6 @@ class Program
         catch (Exception ex)
         {
             Log.Fatal(ex, "An unhandled exception occurred in Main.");
-            Console.WriteLine("An unexpected error occurred. Press any key to exit...");
-            Console.ReadKey();
         }
         finally
         {
