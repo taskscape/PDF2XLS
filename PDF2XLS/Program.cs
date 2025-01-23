@@ -28,6 +28,7 @@ class Program
     private static string ResponseSchema { get; set; }
     private static string NuDeltaBaseUrl = "https://www.nudelta.pl/api/v1";
     private static bool DeleteAfter { get; set; }
+    private static Dictionary<string, string> Mappings { get; set; }
 
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
@@ -69,6 +70,9 @@ class Program
             OpenAiApiKey = config["OpenAI_APIKey"] ?? "";
             ResponseSchema = fileContents;
             DeleteAfter = bool.Parse(config["DeleteFileAfterProcessing"]);
+            Mappings = config.GetSection("GoogleSheets:Mappings")
+                .Get<Dictionary<string, string>>() ?? new Dictionary<string, string>();
+            
             if (args.Length < 1)
             {
                 Console.WriteLine("Usage: PDF2XLS <input file path> [output directory]");
@@ -286,7 +290,32 @@ class Program
 
                 GSheets sheets = new GSheets(config);
                 SheetsService sheetsService = sheets.CreateSheetsService();
-                sheets.AddRow(sheetsService, issueDateString, refNumber, sellerName, invNumber, totalAmount, leftToPay, currency);
+                Dictionary<string, string> data = new Dictionary<string, string>
+                {
+                    { "InvoiceNumber", invNumber },
+                    { "ReferenceNumber", refNumber },
+                    { "IssueDate", issueDateString },
+                    { "SaleDate", saleDateString },
+                    { "PaymentMethod", paymentMethod },
+                    { "Maturity", maturity },
+                    { "Currency", currency },
+                    { "TotalAmount", totalAmount },
+                    { "PaidAmount", paidAmount },
+                    { "AmountLeftToPay", leftToPay },
+                    { "IBAN", iban },
+                    { "SellerNIP", sellerNip },
+                    { "SellerName", sellerName },
+                    { "SellerCity", sellerCity },
+                    { "SellerStreet", sellerStreet },
+                    { "SellerZIP", sellerZip },
+                    { "BuyerNIP", buyerNip },
+                    { "BuyerName", buyerName },
+                    { "BuyerCity", buyerCity },
+                    { "BuyerStreet", buyerStreet },
+                    { "BuyerZIP", buyerZip }
+                };
+                
+                sheets.AddRow(sheetsService, data, Mappings);
                 
                 if (DeleteAfter)
                 {

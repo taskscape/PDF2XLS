@@ -38,41 +38,74 @@ public class GSheets
         });
     }
 
-    public void AddRow(SheetsService sheetsService, string invoiceDate, string reference, string sellerName, string invoiceNumber, string priceInPln, string priceToPay, string originalCurrency)
+    public void AddRow(
+        SheetsService sheetsService,
+        Dictionary<string, string> data,
+        Dictionary<string, string> columnMappings
+    )
     {
         try
         {
-            List<object> row =
-            [
-                invoiceDate, sellerName, invoiceNumber, reference, "", "", priceInPln, priceToPay, originalCurrency, "", "", ""
-            ];
+            int maxColumns = columnMappings
+                .Values
+                .Where(column => !string.IsNullOrEmpty(column))
+                .Select(column => GetColumnIndex(column) ?? 0)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            
+            List<object> row = [..new object[maxColumns]];
+            
+            foreach (KeyValuePair<string, string> mapping in columnMappings)
+            {
+                if (!string.IsNullOrEmpty(mapping.Value) && data.TryGetValue(mapping.Key, out string value))
+                {
+                    int? columnIndex = GetColumnIndex(mapping.Value);
+                    if (columnIndex.HasValue)
+                    {
+                        row[columnIndex.Value] = value;
+                    }
+                }
+            }
             
             ValueRange valueRange = new ValueRange
             {
                 Values = new List<IList<object>> { row }
             };
-            
-            SpreadsheetsResource.ValuesResource.AppendRequest? request = sheetsService.Spreadsheets.Values.Append(
+
+            var request = sheetsService.Spreadsheets.Values.Append(
                 valueRange,
                 _spreadsheetId,
                 _sheetName
             );
-            
+
             request.ValueInputOption = SpreadsheetsResource.ValuesResource
                 .AppendRequest
                 .ValueInputOptionEnum.USERENTERED;
-            
+
             request.InsertDataOption = SpreadsheetsResource.ValuesResource
                 .AppendRequest
                 .InsertDataOptionEnum.INSERTROWS;
-            
+
             request.Execute();
-        
+
             Console.WriteLine("Data appended to Google Sheet successfully!");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"An error occured: {ex.Message}");
+            Console.WriteLine($"An error occurred: {ex.Message}");
         }
+    }
+
+    private static int? GetColumnIndex(string columnLetter)
+    {
+        if (string.IsNullOrEmpty(columnLetter))
+            return null;
+
+        int index = 0;
+        foreach (char c in columnLetter.ToUpper())
+        {
+            index = index * 26 + (c - 'A') + 1;
+        }
+        return index - 1;
     }
 }
