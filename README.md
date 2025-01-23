@@ -22,6 +22,7 @@ Inside `appsettings.json`, there are field which you need to fill in:
 - `SpreadsheetId`: ID of your Google Spreadsheet. You can find it by going into your spreadsheet in a browser and copying it from the URL (it comes after /spreadsheets/d/).
 - `SheetName`: Name of your spreadsheet sheet.
 - `ApplicationName`: Name of your Google Sheets API Service Account (Not email).
+- `DeleteFileAfterProcessing`: Set to `true` if you want the processed file to be deleted, or `false` it you want it to be backed up.
 
 These fields are necessary for API communication.
 
