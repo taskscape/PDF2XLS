@@ -99,7 +99,7 @@ class Program
                 AsyncRetryPolicy? retryPolicy = Policy
                     .Handle<Exception>()
                     .WaitAndRetryAsync(
-                        retryCount: 3,
+                        retryCount: 5,
                         sleepDurationProvider: attempt => TimeSpan.FromSeconds(1),
                         onRetry: (exception, timeSpan, retryCount, context) =>
                         {
@@ -115,13 +115,9 @@ class Program
                 {
                     string response = await GetJsonResponse(inputFilePath);
                     root = JsonNode.Parse(response);
-                    try
+                    if (root?["data"]?["issue"] == null || string.IsNullOrEmpty(root["data"]["issue"].ToString()))
                     {
-                        string.IsNullOrEmpty(root?["data"]["issue"].ToString());
-                    }
-                    catch (Exception)
-                    {
-                        throw new Exception("JSON response is empty");
+                        throw new InvalidOperationException("JSON response is missing or empty issue data");
                     }
                 });
                 JsonNode? dataNode = root?["data"];
