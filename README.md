@@ -18,12 +18,16 @@ Inside `appsettings.json`, there are field which you need to fill in:
 - `Password`: Your NuDelta Invoice login Password.
 - `PreferredAPI`: The API that you want to use. It can either be `NuDelta` or `OpenAI`.
 - `OpenAI_APIKey`: Your OpenAI API token.
-- `ServiceAccountFile`: Path to your Google Service Account json file.
-- `SpreadsheetId`: ID of your Google Spreadsheet. You can find it by going into your spreadsheet in a browser and copying it from the URL (it comes after /spreadsheets/d/).
-- `SheetName`: Name of your spreadsheet sheet.
-- `ApplicationName`: Name of your Google Sheets API Service Account (Not email).
-- `DeleteFileAfterProcessing`: Set to `true` if you want the processed file to be deleted, or `false` it you want it to be backed up.
-- `Mappings`: Which columns in the Google Spreadsheet should have what information.
+- `GoogleSheets`:
+    - `ServiceAccountFile`: Path to your Google Service Account json file.
+    - `SpreadsheetId`: ID of your Google Spreadsheet. You can find it by going into your spreadsheet in a browser and copying it from the URL (it comes after /spreadsheets/d/).
+    - `SheetName`: Name of your spreadsheet sheet.
+    - `ApplicationName`: Name of your Google Sheets API Service Account (Not email).
+    - `DeleteFileAfterProcessing`: Set to `true` if you want the processed file to be deleted, or `false` it you want it to be backed up.
+    - `Mappings`: Which columns in the Google Spreadsheet should have what information.
+- `Seq`:
+    - `ServerAddress`: Your Seq server's address.
+    - `AppName`: The application name by which you can filter in Seq
 
 These fields are necessary for API communication.
 
@@ -41,6 +45,7 @@ This is a CLI application, which you can use in two ways:
 # Logging
 
 When ran, the program will create a subfolder named `logs` in it's location, in which it will produce and store logs for up to 7 different days.
+It also logs to a Seq server.
 
 # Important notes
 
