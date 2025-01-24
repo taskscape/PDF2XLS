@@ -29,27 +29,16 @@ class Program
     private static string NuDeltaBaseUrl = "https://www.nudelta.pl/api/v1";
     private static bool DeleteAfter { get; set; }
     private static Dictionary<string, string> Mappings { get; set; }
+    private static string SeqAddress { get; set; }
+    private static string SeqAppName { get; set; }
 
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
     {
-        string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
-        string realExeDirectory = Path.GetDirectoryName(exePath);
-        Log.Logger = new LoggerConfiguration()
-            .MinimumLevel.Debug()
-            .WriteTo.File(
-                path: $"{realExeDirectory}/logs/log-.txt",
-                rollingInterval: RollingInterval.Day,
-                retainedFileCountLimit: 7,
-                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
-            )
-            .CreateLogger();
-
-        Log.Information("Starting PDF2XLS application...");
-
         try
         {
-            
+            string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
+            string realExeDirectory = Path.GetDirectoryName(exePath);
             IConfiguration config = new ConfigurationBuilder()
                 .SetBasePath(realExeDirectory)
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
@@ -64,14 +53,30 @@ class Program
                 fileContents = await reader.ReadToEndAsync();
             }
             
-            Username = config["NuDeltaCredentials:Username"] ?? "";
-            Password = config["NuDeltaCredentials:Password"] ?? "";
-            PreferredApi = config["PreferredAPI"] ?? "";
-            OpenAiApiKey = config["OpenAI_APIKey"] ?? "";
+            Username = config["NuDeltaCredentials:Username"] ?? string.Empty;
+            Password = config["NuDeltaCredentials:Password"] ?? string.Empty;
+            PreferredApi = config["PreferredAPI"] ?? string.Empty;
+            OpenAiApiKey = config["OpenAI_APIKey"] ?? string.Empty;
             ResponseSchema = fileContents;
             DeleteAfter = bool.Parse(config["DeleteFileAfterProcessing"]);
+            SeqAddress = config["Seq:ServerAddress"] ?? string.Empty;
+            SeqAppName = config["Seq:AppName"] ?? string.Empty;
             Mappings = config.GetSection("GoogleSheets:Mappings")
                 .Get<Dictionary<string, string>>() ?? new Dictionary<string, string>();
+
+            Log.Logger = new LoggerConfiguration()
+                .Enrich.WithProperty("Application", SeqAppName)
+                .MinimumLevel.Debug()
+                .WriteTo.File(
+                    path: $"{realExeDirectory}/logs/log-.txt",
+                    rollingInterval: RollingInterval.Day,
+                    retainedFileCountLimit: 7,
+                    outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+                )
+                .WriteTo.Seq(SeqAddress)
+                .CreateLogger();
+
+            Log.Information("Starting PDF2XLS application...");
             
             if (args.Length < 1)
             {
