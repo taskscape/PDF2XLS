@@ -31,6 +31,8 @@ class Program
     private static Dictionary<string, string> Mappings { get; set; }
     private static string SeqAddress { get; set; }
     private static string SeqAppName { get; set; }
+    private static bool UploadPDFStatus { get; set; }
+    private static string PDF2URLPath { get; set; }
 
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
@@ -61,6 +63,8 @@ class Program
             DeleteAfter = bool.Parse(config["DeleteFileAfterProcessing"]);
             SeqAddress = config["Seq:ServerAddress"] ?? string.Empty;
             SeqAppName = config["Seq:AppName"] ?? string.Empty;
+            UploadPDFStatus = bool.Parse(config["UploadPDF:Enabled"]);
+            PDF2URLPath = config["UploadPDF:PDF2URLPath"] ?? string.Empty;
             Mappings = config.GetSection("GoogleSheets:Mappings")
                 .Get<Dictionary<string, string>>() ?? new Dictionary<string, string>();
 
@@ -278,7 +282,7 @@ class Program
                 ws.Cell(currentRow, 9).Value = totalBrutto;
                 ws.Cell(currentRow, 1).Value = "Do zapłaty:";
                 ws.Cell(currentRow, 2).Value = leftToPay;
-
+                
                 // Formatting
                 ws.Columns().AdjustToContents();
                 ws.Range("A3:A9").Style.Font.Bold = true;
@@ -293,6 +297,12 @@ class Program
                 Console.WriteLine("RET-OUTPUT: " + outputPath);
                 Console.WriteLine($"Excel file saved to: {outputPath}");
                 Log.Information("Excel file saved successfully to {OutputPath}", outputPath);
+
+                string documentLink = string.Empty;
+                if (UploadPDFStatus)
+                {
+                    documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
+                }
 
                 GSheets sheets = new GSheets(config);
                 SheetsService sheetsService = sheets.CreateSheetsService();
@@ -318,7 +328,8 @@ class Program
                     { "BuyerName", buyerName },
                     { "BuyerCity", buyerCity },
                     { "BuyerStreet", buyerStreet },
-                    { "BuyerZIP", buyerZip }
+                    { "BuyerZIP", buyerZip },
+                    { "DocumentLink", documentLink }
                 };
                 
                 sheets.AddRow(sheetsService, data, Mappings);
@@ -617,5 +628,23 @@ class Program
         });
 
         return messages;
+    }
+    
+    private static string RunPDF2URL(string exePath, string filePath)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = exePath,
+            Arguments = $"\"{filePath}\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            CreateNoWindow = true
+        };
+
+        using var process = Process.Start(startInfo);
+        string output = process?.StandardOutput.ReadToEnd() ?? string.Empty;
+    
+        process?.WaitForExit();
+        return output;
     }
 }
