@@ -290,6 +290,7 @@ class Program
 
                 wb.SaveAs(outputPath);
 
+                Console.WriteLine("RET-OUTPUT: " + outputPath);
                 Console.WriteLine($"Excel file saved to: {outputPath}");
                 Log.Information("Excel file saved successfully to {OutputPath}", outputPath);
 
