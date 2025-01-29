@@ -524,6 +524,6 @@ class Program
         string output = process?.StandardOutput.ReadToEnd() ?? string.Empty;
     
         process?.WaitForExit();
-        return output;
+        return output.TrimEnd();
     }
 }
