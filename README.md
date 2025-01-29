@@ -1,13 +1,14 @@
 # PDF2XLS
 
-This program lets you easily convert pdf invoices into excel spreadsheets by utilising NuDelta or OpenAI's API.
-It also appends a row in a specified Google Spreadsheet.
+This program lets you easily convert pdf invoices into rows in Google Spreadsheets by utilising NuDelta or OpenAI's API.
+It has the ability to upload your file to a service and provide a link to it in the spreadsheet.
 The APIs are not perfect, always double check the output and fix errors manually.
 
 # Prerequisites:
 - NuDelta Invoice account
 - OpenAI Token with balance
 - Google Service Account file in json format
+- PDF2URL program if wanted
 
 # Installation
 
@@ -23,24 +24,23 @@ Inside `appsettings.json`, there are field which you need to fill in:
     - `SpreadsheetId`: ID of your Google Spreadsheet. You can find it by going into your spreadsheet in a browser and copying it from the URL (it comes after /spreadsheets/d/).
     - `SheetName`: Name of your spreadsheet sheet.
     - `ApplicationName`: Name of your Google Sheets API Service Account (Not email).
-    - `DeleteFileAfterProcessing`: Set to `true` if you want the processed file to be deleted, or `false` it you want it to be backed up.
-    - `Mappings`: Which columns in the Google Spreadsheet should have what information.
+    - `Mappings`: Which columns in the Google Spreadsheet should have what information. `DocumentLink` refers to the url where your file is uploaded.
+- `DeleteFileAfterProcessing`: Set to `true` if you want the processed file to be deleted, or `false` it you want it to be backed up.
 - `Seq`:
     - `ServerAddress`: Your Seq server's address.
-    - `AppName`: The application name by which you can filter in Seq
-
-These fields are necessary for API communication.
+    - `AppName`: The application name by which you can filter in Seq.
+- `UploadPDF`:
+    - `Enabled`: Set to `true` if you want your file to be uploaded and accessible through `DocumentLink` mapping, or `false` if you don't want that.
+    - `PDF2URLPath`: Path to your PDF2URL executable, which is responsible for uploading the file and returning the url to it.
 
 # Usage
 
 This is a CLI application, which you can use in two ways:
-- Running from the console by specifying arguments:
-    - First argument is the path to your pdf invoice you want to convert
-    - Second [optional] is the output directory where you want your spreadsheet to go.
-    If not specified, it is set to wherever this program is run from.
+- Running from the console by specifying an argument:
+    - The path to your pdf invoice you want to convert
 
 - Drag and Drop:
-    - You can drag your pdf file onto the app's executable and the spreadsheet will be created in the same location the pdf was in.
+    - You can drag your pdf file onto the app's executable.
 
 # Logging
 

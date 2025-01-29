@@ -5,7 +5,6 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
-using ClosedXML.Excel;
 using Google.Apis.Sheets.v4;
 using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json.Linq;
@@ -84,7 +83,7 @@ class Program
             
             if (args.Length < 1)
             {
-                Console.WriteLine("Usage: PDF2XLS <input file path> [output directory]");
+                Console.WriteLine("Usage: PDF2XLS <input file path>");
                 Console.WriteLine("Press any key to exit...");
                 Console.ReadKey();
                 return;
@@ -104,8 +103,6 @@ class Program
                 Log.Error("File {InputFilePath} is not a PDF file", inputFilePath);
                 return;
             }
-
-            string outputDir = args.Length >= 2 ? args[1] : Environment.CurrentDirectory;
 
             try
             {
@@ -170,133 +167,12 @@ class Program
 
                 // Table rows
                 JsonNode? tablesNode = dataNode?["tables"];
-                JsonArray rows = tablesNode?["rows"]?.AsArray() ?? [];
                 JsonArray totals = tablesNode?["total"]?.AsArray() ?? [];
-
-                string fileNameNoExt = Path.GetFileNameWithoutExtension(inputFilePath);
-                string outputPath = Path.Combine(outputDir, fileNameNoExt + ".xlsx");
-
-                using XLWorkbook wb = new();
-                IXLWorksheet ws = wb.Worksheets.Add("Faktura");
-
-                // Styles
-                IXLStyle? headerStyle = wb.Style;
-                headerStyle.Font.Bold = true;
-                headerStyle.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
-                headerStyle.Fill.BackgroundColor = XLColor.LightGray;
-                headerStyle.Border.OutsideBorder = XLBorderStyleValues.Thin;
-
-                // Invoice Header
-                ws.Cell("A1").Value = "Faktura";
-                ws.Range("A1:B1").Merge().Style.Font.Bold = true;
-                ws.Row(1).Height = 20;
-
-                ws.Cell("A3").Value = "Numer faktury:";
-                ws.Cell("B3").Value = invNumber;
-                ws.Cell("A4").Value = "Data wystawienia:";
-                ws.Cell("B4").Value = issueDateString;
-                ws.Cell("A5").Value = "Data sprzedaży:";
-                ws.Cell("B5").Value = saleDateString;
-                ws.Cell("A6").Value = "Termin zapłaty:";
-                ws.Cell("B6").Value = maturity;
-                ws.Cell("A7").Value = "Forma zapłaty:";
-                ws.Cell("B7").Value = paymentMethod;
-                ws.Cell("A8").Value = "Waluta:";
-                ws.Cell("B8").Value = currency;
-
-                // Seller & Buyer
-                ws.Cell("D3").Value = "Sprzedawca";
-                ws.Cell("D3").Style.Font.Bold = true;
-                ws.Cell("D4").Value = $"NIP: {sellerNip}";
-                ws.Cell("D5").Value = sellerName;
-                ws.Cell("D6").Value = sellerStreet;
-                ws.Cell("D7").Value = $"{sellerZip} {sellerCity}";
-
-                ws.Cell("F3").Value = "Kupujący";
-                ws.Cell("F3").Style.Font.Bold = true;
-                ws.Cell("F4").Value = $"NIP: {buyerNip}";
-                ws.Cell("F5").Value = buyerName;
-                ws.Cell("F6").Value = buyerStreet;
-                ws.Cell("F7").Value = $"{buyerZip} {buyerCity}";
-
-                // Line Items Table
-                int startRow = 10;
-                ws.Cell(startRow, 1).Value = "lp";
-                ws.Cell(startRow, 2).Value = "Nazwa towaru lub usługi";
-                ws.Cell(startRow, 3).Value = "Ilość";
-                ws.Cell(startRow, 4).Value = "Jm";
-                ws.Cell(startRow, 5).Value = "Cena netto";
-                ws.Cell(startRow, 6).Value = "Stawka VAT %";
-                ws.Cell(startRow, 7).Value = "Wartość Netto";
-                ws.Cell(startRow, 8).Value = "Wartość VAT";
-                ws.Cell(startRow, 9).Value = "Wartość Brutto";
-
-                ws.Range(startRow, 1, startRow, 9).Style = headerStyle;
-
-                int currentRow = startRow + 1;
-                int lastItemRow = currentRow;
-                foreach (JsonNode? r in rows)
-                {
-                    lastItemRow = currentRow;
-                    string noVal = GetValFromNode(r?["no"]);
-                    string nameVal = GetValFromNode(r?["name"]);
-                    string amountVal = GetValFromNode(r?["amount"]);
-                    string unitVal = GetValFromNode(r?["unit"]);
-                    string priceNettoVal = GetValFromNode(r?["priceNetto"]);
-                    string vatVal = GetValFromNode(r?["vat"]);
-                    string valNettoVal = GetValFromNode(r?["valNetto"]);
-                    string valVatVal = GetValFromNode(r?["valVat"]);
-                    string valBruttoVal = GetValFromNode(r?["valBrutto"]);
-
-                    ws.Cell(currentRow, 1).Value = noVal;
-                    ws.Cell(currentRow, 2).Value = nameVal;
-                    ws.Cell(currentRow, 3).Value = amountVal;
-                    ws.Cell(currentRow, 4).Value = unitVal;
-                    ws.Cell(currentRow, 5).Value = priceNettoVal;
-                    ws.Cell(currentRow, 6).Value = vatVal;
-                    ws.Cell(currentRow, 7).Value = valNettoVal;
-                    ws.Cell(currentRow, 8).Value = valVatVal;
-                    ws.Cell(currentRow, 9).Value = valBruttoVal;
-
-                    currentRow++;
-                }
-
-                // Totals Section
-                currentRow += 1;
+               
                 JsonNode? totalNode = totals.Count > 0 ? totals[0] : null;
-                string totalNetto = GetValFromNode(totalNode?["valNetto"]);
+                string totalNet = GetValFromNode(totalNode?["valNetto"]);
                 string totalVat = GetValFromNode(totalNode?["valVat"]);
-                string totalBrutto = GetValFromNode(totalNode?["valBrutto"]);
-
-                ws.Cell(currentRow, 8).Value = "Netto Razem:";
-                ws.Cell(currentRow, 9).Value = totalNetto;
-                ws.Cell(currentRow, 1).Value = "IBAN:";
-                ws.Cell(currentRow, 2).Value = iban;
-                currentRow++;
-                ws.Cell(currentRow, 8).Value = "VAT Razem:";
-                ws.Cell(currentRow, 9).Value = totalVat;
-                ws.Cell(currentRow, 1).Value = "Zaliczka otrzymana:";
-                ws.Cell(currentRow, 2).Value = paidAmount;
-                currentRow++;
-                ws.Cell(currentRow, 8).Value = "Brutto Razem:";
-                ws.Cell(currentRow, 9).Value = totalBrutto;
-                ws.Cell(currentRow, 1).Value = "Do zapłaty:";
-                ws.Cell(currentRow, 2).Value = leftToPay;
-                
-                // Formatting
-                ws.Columns().AdjustToContents();
-                ws.Range("A3:A9").Style.Font.Bold = true;
-                ws.Range("A3:A9").Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
-                ws.Range("D3").Style.Font.Bold = true;
-                ws.Range("F3").Style.Font.Bold = true;
-                ws.Range(startRow, 1, lastItemRow, 9).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
-                ws.Range(startRow, 1, lastItemRow, 9).Style.Border.InsideBorder = XLBorderStyleValues.Hair;
-
-                wb.SaveAs(outputPath);
-
-                Console.WriteLine("RET-OUTPUT: " + outputPath);
-                Console.WriteLine($"Excel file saved to: {outputPath}");
-                Log.Information("Excel file saved successfully to {OutputPath}", outputPath);
+                string totalGross = GetValFromNode(totalNode?["valBrutto"]);
 
                 string documentLink = string.Empty;
                 if (UploadPDFStatus)
@@ -329,7 +205,10 @@ class Program
                     { "BuyerCity", buyerCity },
                     { "BuyerStreet", buyerStreet },
                     { "BuyerZIP", buyerZip },
-                    { "DocumentLink", documentLink }
+                    { "DocumentLink", documentLink },
+                    { "TotalNet", totalNet },
+                    { "TotalVat", totalVat },
+                    { "TotalGross", totalGross }
                 };
                 
                 sheets.AddRow(sheetsService, data, Mappings);
