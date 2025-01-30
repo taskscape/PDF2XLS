@@ -121,6 +121,7 @@ class Program
                     );
 
                 JsonNode root = null;
+                string documentLink = string.Empty;
                 await retryPolicy.ExecuteAsync(async () =>
                 {
                     string response = await GetJsonResponse(inputFilePath);
@@ -128,6 +129,14 @@ class Program
                     if (root?["data"]?["issue"] == null || string.IsNullOrEmpty(root["data"]["issue"].ToString()))
                     {
                         throw new InvalidOperationException("JSON response is missing or empty issue data");
+                    }
+                    if (UploadPDFStatus)
+                    {
+                        documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
+                        if (!IsValidHttpUrl(documentLink))
+                        {
+                            throw new Exception("Document failed to upload");
+                        }
                     }
                 });
                 JsonNode? dataNode = root?["data"];
@@ -173,12 +182,6 @@ class Program
                 string totalNet = GetValFromNode(totalNode?["valNetto"]);
                 string totalVat = GetValFromNode(totalNode?["valVat"]);
                 string totalGross = GetValFromNode(totalNode?["valBrutto"]);
-
-                string documentLink = string.Empty;
-                if (UploadPDFStatus)
-                {
-                    documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
-                }
 
                 GSheets sheets = new GSheets(config);
                 SheetsService sheetsService = sheets.CreateSheetsService();
@@ -526,4 +529,15 @@ class Program
         process?.WaitForExit();
         return output.TrimEnd();
     }
+    
+    private static bool IsValidHttpUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uriResult))
+        {
+            return false;
+        }
+        
+        return uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps;
+    }
+
 }
