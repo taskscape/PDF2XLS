@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace PDF2XLS;
+namespace PDF2XLS.Models;
 
 public class AttachmentModel
 {

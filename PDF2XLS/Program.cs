@@ -11,6 +11,8 @@ using Newtonsoft.Json.Linq;
 using OpenAI;
 using OpenAI.Assistants;
 using OpenAI.Files;
+using PDF2XLS.Helpers;
+using PDF2XLS.Models;
 using Polly;
 using Polly.Retry;
 using Serilog;
@@ -133,7 +135,7 @@ class Program
                     if (UploadPDFStatus)
                     {
                         documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
-                        if (!IsValidHttpUrl(documentLink))
+                        if (!StringHelper.IsValidHttpUrl(documentLink))
                         {
                             throw new Exception("Document failed to upload");
                         }
@@ -152,10 +154,10 @@ class Program
                 saleDateString = saleDate.ToString("yyyy-MM-dd");
                 string paymentMethod = GetValFromNode(dataNode?["payment"]);
                 string maturity = GetValFromNode(dataNode?["maturity"]);
-                string currency = GetValFromNode(dataNode?["currency"]);
-                string totalAmount = GetValFromNode(dataNode?["total"]);
-                string paidAmount = GetValFromNode(dataNode?["paid"]);
-                string leftToPay = GetValFromNode(dataNode?["left"]);
+                string currency = CurrencyResolver.GetIsoCurrencyCode(GetValFromNode(dataNode?["currency"]));
+                string totalAmount = StringHelper.RemoveLetters(GetValFromNode(dataNode?["total"]));
+                string paidAmount = StringHelper.RemoveLetters(GetValFromNode(dataNode?["paid"]));
+                string leftToPay = StringHelper.RemoveLetters(GetValFromNode(dataNode?["left"]));
                 string iban = GetValFromNode(dataNode?["iban"]);
 
                 // Seller info
@@ -529,15 +531,4 @@ class Program
         process?.WaitForExit();
         return output.TrimEnd();
     }
-    
-    private static bool IsValidHttpUrl(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uriResult))
-        {
-            return false;
-        }
-        
-        return uriResult.Scheme == Uri.UriSchemeHttp || uriResult.Scheme == Uri.UriSchemeHttps;
-    }
-
 }
