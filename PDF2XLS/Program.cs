@@ -117,8 +117,8 @@ class Program
                         {
                             Console.WriteLine($"Retry {retryCount} after {timeSpan.TotalSeconds}s due to: {exception.Message}");
                             Log.Warning(exception,
-                                "Retry {RetryCount} after {TimeSpanSeconds}s due to exception",
-                                retryCount, timeSpan.TotalSeconds);
+                                "Retry {RetryCount} after {TimeSpanSeconds}s due to exception. File: {file}",
+                                retryCount, timeSpan.TotalSeconds, inputFilePath);
                         }
                     );
 
@@ -232,7 +232,7 @@ class Program
             catch (Exception e)
             {
                 Console.WriteLine("There was an error while parsing the response, please try again.");
-                Log.Error(e, "Error while parsing the response in Main method.");
+                Log.Error(e, "Error while parsing the response in Main method. File: {file}", inputFilePath);
                 throw;
             }
         }
@@ -280,13 +280,13 @@ class Program
                 _         => await UploadPdfToChatGpt(inputFilePath, OpenAiApiKey, ResponseSchema)
             };
 
-            Log.Information("Received JSON response from {PreferredApi}", PreferredApi);
+            Log.Information("Received JSON response from {PreferredApi}. File: {file}", PreferredApi, inputFilePath);
             return response;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error communicating with {PreferredApi}: " + ex.Message);
-            Log.Error(ex, "Error communicating with {PreferredApi}", PreferredApi);
+            Log.Error(ex, "Error communicating with {PreferredApi}. File: {file}", PreferredApi, inputFilePath);
             return string.Empty;
         }
     }
@@ -298,13 +298,13 @@ class Program
         if (string.IsNullOrEmpty(documentId))
         {
             Console.WriteLine("Document upload failed. No Document ID received.");
-            Log.Error("Document upload failed. No Document ID received from NuDelta.");
+            Log.Error("Document upload failed. No Document ID received from NuDelta. File: {file}", inputFilePath);
             return string.Empty;
         }
 
         Console.WriteLine($"File uploaded successfully. File ID: {documentId}");
-        Log.Information("File uploaded successfully to NuDelta. Document ID: {DocumentId}", documentId);
-        return await GetProcessedResultAsync(baseUrl, username, password, documentId);
+        Log.Information("File uploaded successfully to NuDelta. Document ID: {DocumentId}. File: {file}", documentId, inputFilePath);
+        return await GetProcessedResultAsync(baseUrl, username, password, documentId, inputFilePath);
     }
 
     /// <summary>
@@ -332,13 +332,13 @@ class Program
             JObject jsonObj = JObject.Parse(responseBody);
             string docId = jsonObj["document_id"]?.Value<string>();
 
-            Log.Information("NuDelta UploadDocumentAsync success. Document ID: {DocId}", docId);
+            Log.Information("NuDelta UploadDocumentAsync success. Document ID: {DocId}. File: {file}", docId, filePath);
             return docId;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"UploadDocumentAsync error: {ex.Message}");
-            Log.Error(ex, "UploadDocumentAsync error");
+            Log.Error(ex, "UploadDocumentAsync error. File: {file}", filePath);
             return null;
         }
     }
@@ -346,7 +346,7 @@ class Program
     /// <summary>
     /// Fetches the processed JSON result from the NuDelta API for the given document ID.
     /// </summary>
-    private static async Task<string> GetProcessedResultAsync(string baseUrl, string username, string password, string documentId)
+    private static async Task<string> GetProcessedResultAsync(string baseUrl, string username, string password, string documentId, string? filePath = null)
     {
         AsyncRetryPolicy<string>? retryPolicy = Policy<string>
             .HandleResult(resultJson =>
@@ -368,7 +368,7 @@ class Program
                 sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
                 onRetry: (outcome, timespan, retryAttempt, context) =>
                 {
-                    Log.Warning("Result not ready. Retry attempt {RetryAttempt} after {TimespanSeconds} seconds.", retryAttempt, timespan.TotalSeconds);
+                    Log.Warning("Result not ready. Retry attempt {RetryAttempt} after {TimespanSeconds} seconds. File: {file}", retryAttempt, timespan.TotalSeconds, filePath);
                 });
 
         try
@@ -380,7 +380,7 @@ class Program
             string resultUrl = $"{baseUrl}/documents/{documentId}?compact-response=true";
 
             Console.WriteLine("Waiting for result");
-            Log.Information("Waiting for result from NuDelta: Document ID = {DocumentId}", documentId);
+            Log.Information("Waiting for result from NuDelta: Document ID = {DocumentId}. File: {file}", documentId, filePath);
 
             string resultJson = await retryPolicy.ExecuteAsync(async () =>
             {
@@ -390,13 +390,13 @@ class Program
                 return await response.Content.ReadAsStringAsync();
             });
 
-            Log.Information("Received final JSON result from NuDelta for Document ID: {DocumentId}", documentId);
+            Log.Information("Received final JSON result from NuDelta for Document ID: {DocumentId}. File: {file}", documentId, filePath);
             return resultJson;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"GetProcessedResultAsync error: {ex.Message}");
-            Log.Error(ex, "GetProcessedResultAsync error");
+            Log.Error(ex, "GetProcessedResultAsync error. File: {file}", filePath);
             return null;
         }
     }
@@ -415,10 +415,10 @@ class Program
             ClientResult<OpenAIFile>? uploadResult = await fileClient.UploadFileAsync(fileStream, Path.GetFileName(filePath), uploadPurpose);
             fileId = uploadResult.Value.Id;
             Console.WriteLine($"File uploaded successfully. File ID: {fileId}");
-            Log.Information("File uploaded to OpenAI. File ID: {FileId}", fileId);
+            Log.Information("File uploaded to OpenAI. File ID: {FileId}. File: {file}", fileId, filePath);
         }
         Console.WriteLine("Waiting for result");
-        Log.Information("Waiting for ChatGPT to process file {FileId}", fileId);
+        Log.Information("Waiting for ChatGPT to process file {FileId}. File: {file}", fileId, filePath);
 
         AssistantClient? assistantClient = client.GetAssistantClient();
 
@@ -470,7 +470,7 @@ class Program
         await assistantClient.DeleteThreadAsync(thread.Value.Id);
         await assistantClient.DeleteAssistantAsync(assistant.Value.Id);
 
-        Log.Information("Received final JSON response from ChatGPT");
+        Log.Information("Received final JSON response from ChatGPT. File: {file}", filePath);
         return actualAnswer;
     }
 
