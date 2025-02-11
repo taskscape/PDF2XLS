@@ -187,6 +187,16 @@ class Program
 
                 GSheets sheets = new GSheets(config);
                 SheetsService sheetsService = sheets.CreateSheetsService();
+
+                if (!string.IsNullOrEmpty(invNumber))
+                {
+                    invNumber = string.Concat("\'", invNumber);
+                }
+                if (!string.IsNullOrEmpty(refNumber))
+                {
+                    refNumber = string.Concat("\'", refNumber);
+                }
+                
                 Dictionary<string, string> data = new Dictionary<string, string>
                 {
                     { "InvoiceNumber", invNumber },
