@@ -15,6 +15,7 @@ using OpenAI.Files;
 using PDF2XLS.Helpers;
 using PDF2XLS.Models;
 using Polly;
+using Polly.Fallback;
 using Polly.Retry;
 using Serilog;
 using JsonSerializer = System.Text.Json.JsonSerializer;
@@ -107,9 +108,21 @@ class Program
                 return;
             }
 
+            LLMWhisperer llmWhisperer = new LLMWhisperer(config);
+            await llmWhisperer.ProcessPdfWorkflow(inputFilePath);
+            string txtFilePath = Path.ChangeExtension(inputFilePath, ".txt");
+
+            if (!File.Exists(txtFilePath))
+            {
+                Log.Error("File {InputFilePath} does not exist, aborting processing. File: {file}", txtFilePath, inputFilePath);
+                return;
+            }
+            
             try
             {
-                AsyncRetryPolicy? retryPolicy = Policy
+                JsonNode root = null;
+                string documentLink = string.Empty;
+                AsyncRetryPolicy retryPolicy = Policy
                     .Handle<Exception>()
                     .WaitAndRetryAsync(
                         retryCount: 5,
@@ -118,30 +131,63 @@ class Program
                         {
                             Console.WriteLine($"Retry {retryCount} after {timeSpan.TotalSeconds}s due to: {exception.Message}");
                             Log.Warning(exception,
-                                "Retry {RetryCount} after {TimeSpanSeconds}s due to exception. File: {file}",
+                                "Retry {RetryCount} after {TimespanSeconds}s due to exception. File: {file}",
                                 retryCount, timeSpan.TotalSeconds, inputFilePath);
                         }
                     );
-
-                JsonNode root = null;
-                string documentLink = string.Empty;
-                await retryPolicy.ExecuteAsync(async () =>
+                
+                AsyncFallbackPolicy fallbackPolicy = Policy
+                    .Handle<Exception>()
+                    .FallbackAsync(
+                         fallbackAction: async (_, _) =>
+                         {
+                             Log.Warning("Falling back to txtFilePath as processing with inputFilePath failed after all retries.");
+                             string response = await GetJsonResponse(txtFilePath);
+                             root = JsonNode.Parse(response);
+                             if (root?["data"]?["issue"] == null ||
+                                 string.IsNullOrEmpty(root["data"]["issue"]?.ToString()))
+                             {
+                                 throw new InvalidOperationException("Fallback: JSON response is missing or empty issue data");
+                             }
+                             if (UploadPDFStatus)
+                             {
+                                 documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
+                                 if (!StringHelper.IsValidHttpUrl(documentLink))
+                                 {
+                                     throw new Exception("Fallback: Document failed to upload");
+                                 }
+                             }
+                         },
+                         onFallbackAsync: async (exception, _) =>
+                         {
+                             Log.Warning("Fallback executed due to: {Exception}", exception.Message);
+                             await Task.CompletedTask;
+                         }
+                    );
+                
+                await fallbackPolicy.ExecuteAsync(async (_, _) =>
                 {
-                    string response = await GetJsonResponse(inputFilePath);
-                    root = JsonNode.Parse(response);
-                    if (root?["data"]?["issue"] == null || string.IsNullOrEmpty(root["data"]["issue"].ToString()))
+                    await retryPolicy.ExecuteAsync(async () =>
                     {
-                        throw new InvalidOperationException("JSON response is missing or empty issue data");
-                    }
-                    if (UploadPDFStatus)
-                    {
-                        documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
-                        if (!StringHelper.IsValidHttpUrl(documentLink))
-                        {
-                            throw new Exception("Document failed to upload");
-                        }
-                    }
-                });
+                         string response = await GetJsonResponse(inputFilePath);
+                         root = JsonNode.Parse(response);
+                         
+                         if (root?["data"]?["issue"] == null ||
+                             string.IsNullOrEmpty(root["data"]["issue"]?.ToString()))
+                         {
+                              throw new InvalidOperationException("JSON response is missing or empty issue data");
+                         }
+                         if (UploadPDFStatus)
+                         {
+                             documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
+                             if (!StringHelper.IsValidHttpUrl(documentLink))
+                             {
+                                 throw new Exception("Document failed to upload");
+                             }
+                         }
+                    });
+                }, new Context(), CancellationToken.None);
+                
                 JsonNode? dataNode = root?["data"];
 
                 // Extract top-level fields
