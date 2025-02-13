@@ -1,7 +1,7 @@
 # PDF2XLS
 
 This program lets you easily convert pdf invoices into rows in Google Spreadsheets by utilising NuDelta or OpenAI's API.
-It has the ability to upload your file to a service and provide a link to it in the spreadsheet.
+It has the ability to upload your file to a service and provide a link to it in the spreadsheet. It also generates a text file with extracted text using LLMWhisperer's API.
 The APIs are not perfect, always double check the output and fix errors manually.
 
 # Prerequisites:
@@ -9,6 +9,7 @@ The APIs are not perfect, always double check the output and fix errors manually
 - OpenAI Token with balance
 - Google Service Account file in json format
 - PDF2URL program if wanted
+- LLMWhisperer account
 
 # Installation
 
@@ -32,6 +33,9 @@ Inside `appsettings.json`, there are field which you need to fill in:
 - `UploadPDF`:
     - `Enabled`: Set to `true` if you want your file to be uploaded and accessible through `DocumentLink` mapping, or `false` if you don't want that.
     - `PDF2URLPath`: Path to your PDF2URL executable, which is responsible for uploading the file and returning the url to it.
+- `Whisperer`:
+    - `BaseUrl`: Base url of the LLMWhisperer's API.
+    - `ApiKey`: Your LLMWhisperer API key. Your key must match the correct base url for either Europe or US.
 
 # Usage
 
@@ -49,5 +53,5 @@ It also logs to a Seq server.
 
 # Important notes
 
-When using OpenAI API, the results will be inconsistent and may require multiple tries to successfully process the file.
+When using OpenAI API, the results will be inconsistent and may require multiple tries to successfully process the file. LLMWhisperer is also utilised to extract the text from your PDF and that is used as input when all retries fail.
 Please be patient as it is based on an AI's response.

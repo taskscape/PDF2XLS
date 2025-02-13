@@ -111,12 +111,6 @@ class Program
             LLMWhisperer llmWhisperer = new LLMWhisperer(config);
             await llmWhisperer.ProcessPdfWorkflow(inputFilePath);
             string txtFilePath = Path.ChangeExtension(inputFilePath, ".txt");
-
-            if (!File.Exists(txtFilePath))
-            {
-                Log.Error("File {InputFilePath} does not exist, aborting processing. File: {file}", txtFilePath, inputFilePath);
-                return;
-            }
             
             try
             {
@@ -142,6 +136,11 @@ class Program
                          fallbackAction: async (_, _) =>
                          {
                              Log.Warning("Falling back to txtFilePath as processing with inputFilePath failed after all retries.");
+                             if (!File.Exists(txtFilePath))
+                             {
+                                 Log.Warning("No text file found at {TxtFile}. File: {file}", txtFilePath, inputFilePath);
+                                 throw new FileNotFoundException("No text file found", txtFilePath);
+                             }
                              string response = await GetJsonResponse(txtFilePath);
                              root = JsonNode.Parse(response);
                              if (root?["data"]?["issue"] == null ||
@@ -210,7 +209,7 @@ class Program
                 // Seller info
                 JsonNode? seller = dataNode?["seller"];
                 string sellerNip = GetValFromNode(seller?["nip"]);
-                string sellerName = AbbreviateCompanyType(GetValFromNode(seller?["name"]));
+                string sellerName = StringHelper.AbbreviateCompanyType(GetValFromNode(seller?["name"]));
                 string sellerCity = GetValFromNode(seller?["city"]);
                 string sellerStreet = GetValFromNode(seller?["street"]);
                 string sellerZip = GetValFromNode(seller?["zipcode"]);
@@ -218,7 +217,7 @@ class Program
                 // Buyer info
                 JsonNode? buyer = dataNode?["buyer"];
                 string buyerNip = GetValFromNode(buyer?["nip"]);
-                string buyerName = AbbreviateCompanyType(GetValFromNode(buyer?["name"]));
+                string buyerName = StringHelper.AbbreviateCompanyType(GetValFromNode(buyer?["name"]));
                 string buyerCity = GetValFromNode(buyer?["city"]);
                 string buyerStreet = GetValFromNode(buyer?["street"]);
                 string buyerZip = GetValFromNode(buyer?["zipcode"]);
@@ -570,54 +569,7 @@ class Program
 
         return messages;
     }
-    
-    private static string AbbreviateCompanyType(string companyName)
-    {
-        if (string.IsNullOrWhiteSpace(companyName))
-            return companyName;
-        
-        string result = companyName.Trim();
 
-        result = Regex.Replace(
-            result,
-            @"\bsp\.\s*z\.?\s*o\.?o\.?(?!\w)",
-            "sp. z o.o.",
-            RegexOptions.IgnoreCase
-        );
-        
-        Dictionary<string, string> polishReplacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { @"\bsp[oó][łl]ka akcyjna\b", "S.A." },
-            { @"\bsp[oó][łl]ka z ograniczon[ąa] odpowiedzialno[śs]ci[ąa]\b", "sp. z o.o." },
-            { @"\bsp[oó][łl]ka komandytowa\b", "sp. k." },
-            { @"\bsp[oó][łl]ka jawna\b", "sp. j." },
-            { @"\bsp[oó][łl]ka partnerska\b", "sp. p." },
-            { @"\bsp[oó][łl]ka komandytowo[- ]akcyjna\b", "sp.k.a." },
-            { @"\bsp[oó][łl]ka cywilna\b", "s.c." }
-        };
-
-        result = polishReplacements.Aggregate(result, (current, rule) => Regex.Replace(current, rule.Key, rule.Value, RegexOptions.IgnoreCase));
-
-        var otherReplacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { @"\blimited\b", "Ltd" },
-            { @"\bincorporated\b", "Inc" },
-            { @"\bcorporation\b", "Corp" },
-            { @"\bcompany\b", "Co." },
-            { @"\bpublic limited company\b", "PLC" },
-            { @"\bgesellschaft mit beschr[aä]nkter haftung\b", "GmbH" },
-            { @"\baktiengesellschaft\b", "AG" }
-        };
-
-        foreach (KeyValuePair<string, string> rule in otherReplacements)
-        {
-            string pattern = rule.Key + @"(?=\s*$)";
-            result = Regex.Replace(result, pattern, rule.Value, RegexOptions.IgnoreCase);
-        }
-
-        return result;
-    }
-    
     private static string RunPDF2URL(string exePath, string filePath)
     {
         var startInfo = new ProcessStartInfo
