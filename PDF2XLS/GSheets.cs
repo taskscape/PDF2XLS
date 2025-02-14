@@ -3,6 +3,7 @@ using Google.Apis.Services;
 using Google.Apis.Sheets.v4;
 using Google.Apis.Sheets.v4.Data;
 using Microsoft.Extensions.Configuration;
+using Serilog;
 
 namespace PDF2XLS;
 
@@ -13,24 +14,26 @@ public class GSheets
     private readonly string _spreadsheetId;
     private readonly string _sheetName;
     private readonly string _applicationName;
+    private readonly string _inputFilePath;
     private static readonly string[] Scopes =
     {
         SheetsService.Scope.Spreadsheets,
         SheetsService.Scope.Drive
     };
 
-    public GSheets(IConfiguration config)
+    public GSheets(IConfiguration config, string inputFilePath)
     {
         Config = config;
         _serviceAccountFile = Config["GoogleSheets:ServiceAccountFile"] ?? string.Empty;
         _spreadsheetId = Config["GoogleSheets:SpreadsheetId"] ?? string.Empty;
         _sheetName = Config["GoogleSheets:SheetName"] ?? string.Empty;
         _applicationName = Config["GoogleSheets:ApplicationName"] ?? string.Empty;
+        _inputFilePath = inputFilePath;
     }
 
     public SheetsService CreateSheetsService()
     {
-        var credential = GoogleCredential.FromFile(_serviceAccountFile).CreateScoped(Scopes);
+        GoogleCredential? credential = GoogleCredential.FromFile(_serviceAccountFile).CreateScoped(Scopes);
         return new SheetsService(new BaseClientService.Initializer
         {
             HttpClientInitializer = credential,
@@ -72,7 +75,7 @@ public class GSheets
                 Values = new List<IList<object>> { row }
             };
 
-            var request = sheetsService.Spreadsheets.Values.Append(
+            SpreadsheetsResource.ValuesResource.AppendRequest? request = sheetsService.Spreadsheets.Values.Append(
                 valueRange,
                 _spreadsheetId,
                 _sheetName
@@ -88,11 +91,11 @@ public class GSheets
 
             request.Execute();
 
-            Console.WriteLine("Data appended to Google Sheet successfully!");
+            Log.Information("Data appended to Google Sheet successfully! File: {file}", _inputFilePath);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"An error occurred: {ex.Message}");
+            Log.Error("An error occurred while adding to GSheets: {message}. File: {file}", ex.Message, _inputFilePath);
         }
     }
 

@@ -231,7 +231,7 @@ class Program
                 string totalVat = GetValFromNode(totalNode?["valVat"]);
                 string totalGross = GetValFromNode(totalNode?["valBrutto"]);
 
-                GSheets sheets = new GSheets(config);
+                GSheets sheets = new GSheets(config, inputFilePath);
                 SheetsService sheetsService = sheets.CreateSheetsService();
 
                 if (!string.IsNullOrEmpty(invNumber))
