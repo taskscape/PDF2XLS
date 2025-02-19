@@ -54,7 +54,9 @@ public class LLMWhisperer
 
             if (!string.IsNullOrEmpty(pdfText))
             {
-                string txtFilePath = Path.ChangeExtension(pdfFilePath, ".txt");
+                string txtFilePath = Path.Combine(
+                    Path.GetDirectoryName(pdfFilePath),
+                    $"{DateTime.UtcNow:yyyyMMdd HHmm}_{Path.GetFileName(pdfFilePath)}.txt");
                 await File.WriteAllTextAsync(txtFilePath, pdfText);
                 Log.Information("PDF text extracted and saved to {filePath}. File {file}", txtFilePath, pdfFilePath);
             }
