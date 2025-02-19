@@ -36,6 +36,7 @@ class Program
     private static string SeqAppName { get; set; }
     private static bool UploadPDFStatus { get; set; }
     private static string PDF2URLPath { get; set; }
+    private static Guid RunID { get; set; }
 
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
@@ -70,6 +71,7 @@ class Program
             PDF2URLPath = config["UploadPDF:PDF2URLPath"] ?? string.Empty;
             Mappings = config.GetSection("GoogleSheets:Mappings")
                 .Get<Dictionary<string, string>>() ?? new Dictionary<string, string>();
+            RunID = Guid.NewGuid();
 
             Log.Logger = new LoggerConfiguration()
                 .Enrich.WithProperty("Application", SeqAppName)
@@ -83,7 +85,7 @@ class Program
                 .WriteTo.Seq(SeqAddress)
                 .CreateLogger();
 
-            Log.Information("Starting PDF2XLS application...");
+            Log.Information("Starting PDF2XLS application, Run ID: {RunID}", RunID);
             
             if (args.Length < 1)
             {
@@ -108,7 +110,7 @@ class Program
                 return;
             }
 
-            LLMWhisperer llmWhisperer = new LLMWhisperer(config);
+            LLMWhisperer llmWhisperer = new LLMWhisperer(config, RunID);
             await llmWhisperer.ProcessPdfWorkflow(inputFilePath);
             string txtFilePath = Path.ChangeExtension(inputFilePath, ".txt");
             
@@ -242,7 +244,7 @@ class Program
                 {
                     refNumber = string.Concat("\'", refNumber);
                 }
-                
+
                 Dictionary<string, string> data = new Dictionary<string, string>
                 {
                     { "InvoiceNumber", invNumber },
@@ -269,7 +271,8 @@ class Program
                     { "DocumentLink", documentLink },
                     { "TotalNet", totalNet },
                     { "TotalVat", totalVat },
-                    { "TotalGross", totalGross }
+                    { "TotalGross", totalGross },
+                    { "RunID", RunID.ToString() }
                 };
                 
                 sheets.AddRow(sheetsService, data, Mappings);
@@ -282,7 +285,7 @@ class Program
                 {
                     File.Move(inputFilePath, Path.Combine(
                         Path.GetDirectoryName(inputFilePath),
-                        $"{DateTime.UtcNow:yyyyMMdd HHmm}_{Path.GetFileName(inputFilePath)}.bak"));
+                        $"{DateTime.UtcNow:yyyyMMdd HHmm}_{RunID}_{Path.GetFileName(inputFilePath)}.bak"));
                 }
             }
             catch (Exception e)

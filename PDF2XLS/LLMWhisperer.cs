@@ -13,13 +13,14 @@ public class LLMWhisperer
     private IConfiguration Config { get; }
     private readonly Uri _baseUrl;
     private readonly string _apiKey;
+    private readonly Guid _runId;
     
-    public LLMWhisperer(IConfiguration config)
+    public LLMWhisperer(IConfiguration config, Guid runId)
     {
         Config = config;
         _baseUrl = new Uri(Config["Whisperer:BaseUrl"]);
         _apiKey = Config["Whisperer:ApiKey"] ?? string.Empty;
-
+        _runId = runId;
     }
     
     public async Task ProcessPdfWorkflow(string pdfFilePath)
@@ -56,7 +57,7 @@ public class LLMWhisperer
             {
                 string txtFilePath = Path.Combine(
                     Path.GetDirectoryName(pdfFilePath),
-                    $"{DateTime.UtcNow:yyyyMMdd HHmm}_{Path.GetFileName(pdfFilePath)}.txt");
+                    $"{DateTime.UtcNow:yyyyMMdd HHmm}_{_runId}_{Path.GetFileName(pdfFilePath)}.txt");
                 await File.WriteAllTextAsync(txtFilePath, pdfText);
                 Log.Information("PDF text extracted and saved to {filePath}. File {file}", txtFilePath, pdfFilePath);
             }
