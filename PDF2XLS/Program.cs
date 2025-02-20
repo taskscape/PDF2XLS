@@ -279,7 +279,7 @@ class Program
                     { "RunID", RunID.ToString() }
                 };
                 
-                sheets.AddRow(sheetsService, data, Mappings);
+                sheets.AppendRowWithBatchUpdate(sheetsService, data, Mappings);
                 
                 if (DeleteAfter)
                 {
