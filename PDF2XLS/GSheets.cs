@@ -56,7 +56,7 @@ public class GSheets
                 .DefaultIfEmpty(0)
                 .Max() + 1;
             
-            List<object> row = [..new object[maxColumns]];
+            List<object> row = Enumerable.Repeat<object>(string.Empty, maxColumns).ToList();
             
             foreach (KeyValuePair<string, string> mapping in columnMappings)
             {

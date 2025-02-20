@@ -37,6 +37,7 @@ class Program
     private static bool UploadPDFStatus { get; set; }
     private static string PDF2URLPath { get; set; }
     private static Guid RunID { get; set; }
+    private static string RunTime { get; set; }
 
     [Experimental("OPENAI001")]
     static async Task Main(string[] args)
@@ -72,6 +73,7 @@ class Program
             Mappings = config.GetSection("GoogleSheets:Mappings")
                 .Get<Dictionary<string, string>>() ?? new Dictionary<string, string>();
             RunID = Guid.NewGuid();
+            RunTime = DateTime.UtcNow.ToString("yyyyMMdd HHmm");
 
             Log.Logger = new LoggerConfiguration()
                 .Enrich.WithProperty("Application", SeqAppName)
@@ -110,9 +112,11 @@ class Program
                 return;
             }
 
-            LLMWhisperer llmWhisperer = new LLMWhisperer(config, RunID);
+            LLMWhisperer llmWhisperer = new LLMWhisperer(config, RunID, RunTime);
             await llmWhisperer.ProcessPdfWorkflow(inputFilePath);
-            string txtFilePath = Path.ChangeExtension(inputFilePath, ".txt");
+            string txtFilePath = Path.Combine(
+                Path.GetDirectoryName(inputFilePath),
+                $"{RunTime}_{RunID}_{Path.GetFileName(inputFilePath)}.txt");
             
             try
             {
@@ -285,7 +289,7 @@ class Program
                 {
                     File.Move(inputFilePath, Path.Combine(
                         Path.GetDirectoryName(inputFilePath),
-                        $"{DateTime.UtcNow:yyyyMMdd HHmm}_{RunID}_{Path.GetFileName(inputFilePath)}.bak"));
+                        $"{RunTime}_{RunID}_{Path.GetFileName(inputFilePath)}.bak"));
                 }
             }
             catch (Exception e)
