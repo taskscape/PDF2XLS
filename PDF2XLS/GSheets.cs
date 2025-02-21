@@ -3,6 +3,7 @@ using Google.Apis.Sheets.v4;
 using Google.Apis.Sheets.v4.Data;
 using Microsoft.Extensions.Configuration;
 using Serilog;
+using System.Globalization;
 
 namespace PDF2XLS;
 
@@ -24,7 +25,7 @@ public class GSheets
         _applicationName = Config["GoogleSheets:ApplicationName"] ?? string.Empty;
         _inputFilePath = inputFilePath;
     }
-    
+
     private static int? GetColumnIndex(string columnLetter)
     {
         if (string.IsNullOrEmpty(columnLetter))
@@ -39,15 +40,15 @@ public class GSheets
         }
         return index - 1;
     }
-    
+
     private int? GetSheetId(SheetsService sheetsService)
     {
-        var spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
-        var sheet = spreadsheet.Sheets.FirstOrDefault(s =>
+        Spreadsheet? spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
+        Sheet? sheet = spreadsheet.Sheets.FirstOrDefault(s =>
             s.Properties.Title.Equals(_sheetName, StringComparison.OrdinalIgnoreCase));
         return sheet?.Properties.SheetId;
     }
-    
+
     public SheetsService CreateSheetsService()
     {
         GoogleCredential? credential = GoogleCredential
@@ -61,6 +62,41 @@ public class GSheets
         });
     }
     
+    private (ExtendedValue Value, CellFormat? Format) GetExtendedValueAndFormat(string value)
+    {
+        if (DateTime.TryParse(value, out DateTime dateValue))
+        {
+            double dateSerial = (dateValue - new DateTime(1899, 12, 30)).TotalDays;
+            return (
+                new ExtendedValue { NumberValue = dateSerial },
+                new CellFormat
+                {
+                    NumberFormat = new NumberFormat
+                    {
+                        Type = "DATE",
+                        Pattern = "yyyy-MM-dd"
+                    }
+                }
+            );
+        }
+
+        if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out double numericValue))
+        {
+            return (
+                new ExtendedValue { NumberValue = numericValue },
+                new CellFormat
+                {
+                    NumberFormat = new NumberFormat
+                    {
+                        Type = "NUMBER"
+                    }
+                }
+            );
+        }
+
+        return (new ExtendedValue { StringValue = value }, null);
+    }
+
     public void AppendRowWithBatchUpdate(
         SheetsService sheetsService,
         Dictionary<string, string> data,
@@ -77,45 +113,49 @@ public class GSheets
             
             string range = $"{_sheetName}!A:A";
             SpreadsheetsResource.ValuesResource.GetRequest? getRequest = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
-            ValueRange? getResponse = getRequest.Execute();
+            ValueRange getResponse = getRequest.Execute();
             int nextRow = (getResponse.Values?.Count ?? 0) + 1;
-            
+
             List<Request> requests = [];
 
             foreach (KeyValuePair<string, string> mapping in columnMappings)
             {
-                if (!string.IsNullOrEmpty(mapping.Value) &&
-                    data.TryGetValue(mapping.Key, out string value) &&
-                    GetColumnIndex(mapping.Value) is { } columnIndex)
-                {
-                    CellData cellData = new CellData
-                    {
-                        UserEnteredValue = new ExtendedValue { StringValue = value }
-                    };
-                    
-                    Request updateCellRequest = new Request
-                    {
-                        UpdateCells = new UpdateCellsRequest
-                        {
-                            Start = new GridCoordinate
-                            {
-                                SheetId = sheetId.Value,
-                                RowIndex = nextRow - 1,
-                                ColumnIndex = columnIndex
-                            },
-                            Rows = new List<RowData>
-                            {
-                                new()
-                                {
-                                    Values = new List<CellData> { cellData }
-                                }
-                            },
-                            Fields = "userEnteredValue"
-                        }
-                    };
+                if (string.IsNullOrEmpty(mapping.Value) ||
+                    !data.TryGetValue(mapping.Key, out string value) ||
+                    GetColumnIndex(mapping.Value) is not { } columnIndex) continue;
 
-                    requests.Add(updateCellRequest);
+                (ExtendedValue extendedValue, CellFormat? cellFormat) = GetExtendedValueAndFormat(value);
+
+                CellData cellData = new CellData
+                {
+                    UserEnteredValue = extendedValue
+                };
+                
+                if (cellFormat != null)
+                {
+                    cellData.UserEnteredFormat = cellFormat;
                 }
+
+                Request updateCellRequest = new Request
+                {
+                    UpdateCells = new UpdateCellsRequest
+                    {
+                        Start = new GridCoordinate
+                        {
+                            SheetId = sheetId.Value,
+                            RowIndex = nextRow - 1,
+                            ColumnIndex = columnIndex
+                        },
+                        Rows = new List<RowData>
+                        {
+                            new() { Values = new List<CellData> { cellData } }
+                        },
+
+                        Fields = "userEnteredValue,userEnteredFormat.numberFormat"
+                    }
+                };
+
+                requests.Add(updateCellRequest);
             }
 
             if (requests.Any())
