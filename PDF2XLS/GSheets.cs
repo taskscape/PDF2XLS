@@ -111,10 +111,23 @@ public class GSheets
                 return;
             }
             
-            string range = $"{_sheetName}!A:A";
+            string range = $"{_sheetName}!A:Z";
             SpreadsheetsResource.ValuesResource.GetRequest? getRequest = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
             ValueRange getResponse = getRequest.Execute();
-            int nextRow = (getResponse.Values?.Count ?? 0) + 1;
+            int lastNonEmptyRowIndex = -1;
+            if (getResponse.Values != null)
+            {
+                for (int i = 0; i < getResponse.Values.Count; i++)
+                {
+                    IList<object>? row = getResponse.Values[i];
+                    if (row.Any(cell => cell != null && !string.IsNullOrWhiteSpace(cell.ToString())))
+                    {
+                        lastNonEmptyRowIndex = i;
+                    }
+                }
+            }
+            
+            int nextRow = lastNonEmptyRowIndex + 2; 
 
             List<Request> requests = [];
 
@@ -150,7 +163,6 @@ public class GSheets
                         {
                             new() { Values = new List<CellData> { cellData } }
                         },
-
                         Fields = "userEnteredValue,userEnteredFormat.numberFormat"
                     }
                 };
