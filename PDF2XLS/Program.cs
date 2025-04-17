@@ -120,8 +120,8 @@ class Program
             
             try
             {
-                JsonNode root = null;
-                string documentLink = string.Empty;
+                JsonNode? root = null;
+                string? documentLink = string.Empty;
                 AsyncRetryPolicy retryPolicy = Policy
                     .Handle<Exception>()
                     .WaitAndRetryAsync(
@@ -147,7 +147,7 @@ class Program
                                  Log.Warning("No text file found at {TxtFile}. File: {file}", txtFilePath, inputFilePath);
                                  throw new FileNotFoundException("No text file found", txtFilePath);
                              }
-                             string response = await GetJsonResponse(txtFilePath);
+                             string? response = await GetJsonResponse(txtFilePath);
                              root = JsonNode.Parse(response);
                              if (root?["data"]?["issue"] == null ||
                                  string.IsNullOrEmpty(root["data"]["issue"]?.ToString()))
@@ -174,7 +174,7 @@ class Program
                 {
                     await retryPolicy.ExecuteAsync(async () =>
                     {
-                         string response = await GetJsonResponse(inputFilePath);
+                         string? response = await GetJsonResponse(inputFilePath);
                          root = JsonNode.Parse(response);
                          
                          if (root?["data"]?["issue"] == null ||
@@ -196,46 +196,46 @@ class Program
                 JsonNode? dataNode = root?["data"];
 
                 // Extract top-level fields
-                string invNumber = GetValFromNode(dataNode?["invn"]);
-                string refNumber = GetValFromNode(dataNode?["reference"]);
-                string issueDateString = GetValFromNode(dataNode?["issue"]);
+                string? invNumber = GetValFromNode(dataNode?["invn"]);
+                string? refNumber = GetValFromNode(dataNode?["reference"]);
+                string? issueDateString = GetValFromNode(dataNode?["issue"]);
                 DateTime.TryParse(issueDateString, out DateTime issueDate);
                 issueDateString = issueDate.ToString("yyyy-MM-dd");
-                string saleDateString = GetValFromNode(dataNode?["sale"]);
+                string? saleDateString = GetValFromNode(dataNode?["sale"]);
                 DateTime.TryParse(saleDateString, out DateTime saleDate);
                 saleDateString = saleDate.ToString("yyyy-MM-dd");
-                string paymentMethod = GetValFromNode(dataNode?["payment"]);
-                string maturity = GetValFromNode(dataNode?["maturity"]);
-                string currency = CurrencyResolver.GetIsoCurrencyCode(GetValFromNode(dataNode?["currency"]));
-                string totalAmount = StringHelper.RemoveLetters(GetValFromNode(dataNode?["total"]));
-                string paidAmount = StringHelper.RemoveLetters(GetValFromNode(dataNode?["paid"]));
-                string leftToPay = StringHelper.RemoveLetters(GetValFromNode(dataNode?["left"]));
-                string iban = GetValFromNode(dataNode?["iban"]);
+                string? paymentMethod = GetValFromNode(dataNode?["payment"]);
+                string? maturity = GetValFromNode(dataNode?["maturity"]);
+                string? currency = CurrencyResolver.GetIsoCurrencyCode(GetValFromNode(dataNode?["currency"]));
+                string? totalAmount = StringHelper.RemoveLetters(GetValFromNode(dataNode?["total"]));
+                string? paidAmount = StringHelper.RemoveLetters(GetValFromNode(dataNode?["paid"]));
+                string? leftToPay = StringHelper.RemoveLetters(GetValFromNode(dataNode?["left"]));
+                string? iban = GetValFromNode(dataNode?["iban"]);
 
                 // Seller info
                 JsonNode? seller = dataNode?["seller"];
-                string sellerNip = GetValFromNode(seller?["nip"]);
-                string sellerName = StringHelper.AbbreviateCompanyType(GetValFromNode(seller?["name"]));
-                string sellerCity = GetValFromNode(seller?["city"]);
-                string sellerStreet = GetValFromNode(seller?["street"]);
-                string sellerZip = GetValFromNode(seller?["zipcode"]);
+                string? sellerNip = GetValFromNode(seller?["nip"]);
+                string? sellerName = StringHelper.AbbreviateCompanyType(GetValFromNode(seller?["name"]));
+                string? sellerCity = GetValFromNode(seller?["city"]);
+                string? sellerStreet = GetValFromNode(seller?["street"]);
+                string? sellerZip = GetValFromNode(seller?["zipcode"]);
 
                 // Buyer info
                 JsonNode? buyer = dataNode?["buyer"];
-                string buyerNip = GetValFromNode(buyer?["nip"]);
-                string buyerName = StringHelper.AbbreviateCompanyType(GetValFromNode(buyer?["name"]));
-                string buyerCity = GetValFromNode(buyer?["city"]);
-                string buyerStreet = GetValFromNode(buyer?["street"]);
-                string buyerZip = GetValFromNode(buyer?["zipcode"]);
+                string? buyerNip = GetValFromNode(buyer?["nip"]);
+                string? buyerName = StringHelper.AbbreviateCompanyType(GetValFromNode(buyer?["name"]));
+                string? buyerCity = GetValFromNode(buyer?["city"]);
+                string? buyerStreet = GetValFromNode(buyer?["street"]);
+                string? buyerZip = GetValFromNode(buyer?["zipcode"]);
 
                 // Table rows
                 JsonNode? tablesNode = dataNode?["tables"];
                 JsonArray totals = tablesNode?["total"]?.AsArray() ?? [];
                
                 JsonNode? totalNode = totals.Count > 0 ? totals[0] : null;
-                string totalNet = GetValFromNode(totalNode?["valNetto"]);
-                string totalVat = GetValFromNode(totalNode?["valVat"]);
-                string totalGross = GetValFromNode(totalNode?["valBrutto"]);
+                string? totalNet = GetValFromNode(totalNode?["valNetto"]);
+                string? totalVat = GetValFromNode(totalNode?["valVat"]);
+                string? totalGross = GetValFromNode(totalNode?["valBrutto"]);
 
                 GSheets sheets = new GSheets(config, inputFilePath);
                 SheetsService sheetsService = sheets.CreateSheetsService();
@@ -249,7 +249,7 @@ class Program
                     refNumber = string.Concat("\'", refNumber);
                 }
 
-                Dictionary<string, string> data = new Dictionary<string, string>
+                Dictionary<string, string?> data = new Dictionary<string, string?>
                 {
                     { "InvoiceNumber", invNumber },
                     { "ReferenceNumber", refNumber },
@@ -312,7 +312,7 @@ class Program
     /// <summary>
     /// Returns value of the node as a string
     /// </summary>
-    private static string GetValFromNode(JsonNode node)
+    private static string? GetValFromNode(JsonNode node)
     {
         switch (node)
         {
@@ -332,11 +332,11 @@ class Program
     }
 
     [Experimental("OPENAI001")]
-    private static async Task<string> GetJsonResponse(string inputFilePath)
+    private static async Task<string?> GetJsonResponse(string inputFilePath)
     {
         try
         {
-            string response = PreferredApi switch
+            string? response = PreferredApi switch
             {
                 "NuDelta" => await UploadPdfToNuDelta(NuDeltaBaseUrl, Username, Password, inputFilePath),
                 "OpenAI"  => await UploadPdfToChatGpt(inputFilePath, OpenAiApiKey, ResponseSchema),
@@ -354,9 +354,9 @@ class Program
         }
     }
 
-    private static async Task<string> UploadPdfToNuDelta(string baseUrl, string username, string password, string inputFilePath)
+    private static async Task<string?> UploadPdfToNuDelta(string baseUrl, string username, string password, string inputFilePath)
     {
-        string documentId = await UploadDocumentAsync(baseUrl, username, password, inputFilePath);
+        string? documentId = await UploadDocumentAsync(baseUrl, username, password, inputFilePath);
 
         if (string.IsNullOrEmpty(documentId))
         {
@@ -373,7 +373,7 @@ class Program
     /// <summary>
     /// Uploads a file to the NuDelta API. Returns the generated document ID on success.
     /// </summary>
-    private static async Task<string> UploadDocumentAsync(string baseUrl, string username, string password, string filePath)
+    private static async Task<string?> UploadDocumentAsync(string baseUrl, string username, string password, string filePath)
     {
         try
         {
@@ -393,7 +393,7 @@ class Program
 
             string responseBody = await response.Content.ReadAsStringAsync();
             JObject jsonObj = JObject.Parse(responseBody);
-            string docId = jsonObj["document_id"]?.Value<string>();
+            string? docId = jsonObj["document_id"]?.Value<string>();
 
             Log.Information("NuDelta UploadDocumentAsync success. Document ID: {DocId}. File: {file}", docId, filePath);
             return docId;
@@ -409,9 +409,9 @@ class Program
     /// <summary>
     /// Fetches the processed JSON result from the NuDelta API for the given document ID.
     /// </summary>
-    private static async Task<string> GetProcessedResultAsync(string baseUrl, string username, string password, string documentId, string? filePath = null)
+    private static async Task<string?> GetProcessedResultAsync(string baseUrl, string username, string password, string? documentId, string? filePath = null)
     {
-        AsyncRetryPolicy<string>? retryPolicy = Policy<string>
+        AsyncRetryPolicy<string?>? retryPolicy = Policy<string>
             .HandleResult(resultJson =>
             {
                 JsonNode? root = JsonNode.Parse(resultJson);
@@ -419,7 +419,7 @@ class Program
                 {
                     case JsonObject jsonObject when jsonObject.ContainsKey("state"):
                     {
-                        string state = GetValFromNode(root["state"]!);
+                        string? state = GetValFromNode(root["state"]!);
                         return !string.Equals(state, "done", StringComparison.OrdinalIgnoreCase);
                     }
                     default:
@@ -445,7 +445,7 @@ class Program
             Console.WriteLine("Waiting for result");
             Log.Information("Waiting for result from NuDelta: Document ID = {DocumentId}. File: {file}", documentId, filePath);
 
-            string resultJson = await retryPolicy.ExecuteAsync(async () =>
+            string? resultJson = await retryPolicy.ExecuteAsync(async () =>
             {
                 HttpResponseMessage response = await client.GetAsync(resultUrl);
                 response.EnsureSuccessStatusCode();
@@ -465,7 +465,7 @@ class Program
     }
 
     [Experimental("OPENAI001")]
-    private static async Task<string> UploadPdfToChatGpt(string filePath, string apiKey, string schema)
+    private static async Task<string?> UploadPdfToChatGpt(string filePath, string apiKey, string schema)
     {
         OpenAIClient client = new(apiKey);
 
@@ -487,6 +487,7 @@ class Program
 
         ClientResult<Assistant>? assistant = await assistantClient.CreateAssistantAsync("gpt-4o-mini", new AssistantCreationOptions
         {
+            // TODO: please make this prompt a configuration parameter or a value sources from external config file
             Instructions = @$"You are a PDF invoice parser. Your task is to analyze a given PDF and output only a valid JSON object (without markdown formatting or any extra text) that strictly adheres to the JSON schema provided below. Use the exact keys as defined in the schema (the keys in your output should not include any additional quotation marks or modifications). If a field isn’t found in the PDF, output an empty string for that field.
                             To correctly map the PDF content to the JSON fields, use context clues and synonyms from both English and Polish. For fields that are less obvious, consider the following examples (these are only guidelines and not an exhaustive list):
 
@@ -569,7 +570,7 @@ class Program
 
         ClientResult<ThreadRun>? run = await assistantClient.CreateRunAsync(thread.Value.Id, assistant.Value.Id);
         List<ThreadMessage> messages = await GetMessagesWithRetryAsync(thread.Value.Id, run.Value.Id, assistantClient);
-        string actualAnswer = messages.FirstOrDefault(message => message.Role == MessageRole.Assistant).Content[0].Text ?? "Please try again.";
+        string? actualAnswer = messages.FirstOrDefault(message => message.Role == MessageRole.Assistant).Content[0].Text ?? "Please try again.";
 
         // Cleanup
         await fileClient.DeleteFileAsync(fileId);
@@ -620,7 +621,7 @@ class Program
         return messages;
     }
 
-    private static string RunPDF2URL(string exePath, string filePath)
+    private static string? RunPDF2URL(string exePath, string filePath)
     {
         ProcessStartInfo startInfo = new()
         {

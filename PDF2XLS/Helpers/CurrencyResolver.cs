@@ -4,7 +4,7 @@ namespace PDF2XLS.Helpers;
 
 public static class CurrencyResolver
 {
-    private static readonly Dictionary<string, string> AmbiguousSymbolFallback =
+    private static readonly Dictionary<string?, string> AmbiguousSymbolFallback =
         new(StringComparer.OrdinalIgnoreCase)
     {
         { "$",  "USD" },
@@ -21,7 +21,7 @@ public static class CurrencyResolver
         { "NT$", "TWD" }
     };
     
-    private static readonly Dictionary<string, string> SymbolToIso = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string?, string> SymbolToIso = new(StringComparer.OrdinalIgnoreCase);
 
     static CurrencyResolver()
     {
@@ -32,11 +32,11 @@ public static class CurrencyResolver
             .Select(g => g.First())
             .ToList();
         
-        Dictionary<string, HashSet<string>> symbolToIsoCandidates = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string?, HashSet<string>> symbolToIsoCandidates = new Dictionary<string?, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (RegionInfo region in allRegions)
         {
-            string symbol  = region.CurrencySymbol;
+            string? symbol  = region.CurrencySymbol;
             string isoCode = region.ISOCurrencySymbol;
 
             if (!symbolToIsoCandidates.ContainsKey(symbol))
@@ -46,9 +46,9 @@ public static class CurrencyResolver
             symbolToIsoCandidates[symbol].Add(isoCode);
         }
         
-        foreach (KeyValuePair<string, HashSet<string>> kvp in symbolToIsoCandidates)
+        foreach (KeyValuePair<string?, HashSet<string>> kvp in symbolToIsoCandidates)
         {
-            string symbol = kvp.Key;
+            string? symbol = kvp.Key;
             HashSet<string> isoCodes = kvp.Value;
 
             if (isoCodes.Count == 1)
@@ -65,7 +65,7 @@ public static class CurrencyResolver
         }
     }
     
-    public static string GetIsoCurrencyCode(string currencySymbol)
+    public static string? GetIsoCurrencyCode(string? currencySymbol)
     {
         return string.IsNullOrWhiteSpace(currencySymbol) ? "" : SymbolToIso.GetValueOrDefault(currencySymbol, currencySymbol);
     }
