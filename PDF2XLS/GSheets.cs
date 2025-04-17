@@ -64,36 +64,44 @@ public class GSheets
     
     private (ExtendedValue Value, CellFormat? Format) GetExtendedValueAndFormat(string value)
     {
-        if (DateTime.TryParse(value, out DateTime dateValue))
+        if (TryParseFlexibleDecimal(value, out decimal decValue))
         {
-            double dateSerial = (dateValue - new DateTime(1899, 12, 30)).TotalDays;
+            decValue = decimal.Round(decValue, 2, MidpointRounding.AwayFromZero);
+            
+            double dbl = (double)decValue;
+
             return (
-                new ExtendedValue { NumberValue = dateSerial },
+                new ExtendedValue { NumberValue = dbl },
                 new CellFormat
                 {
                     NumberFormat = new NumberFormat
                     {
-                        Type = "DATE",
-                        Pattern = "yyyy-MM-dd"
+                        Type    = "NUMBER",
+                        Pattern = "#,##0.00"
                     }
                 }
             );
         }
-
-        if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out double numericValue))
+        
+        if (DateTime.TryParse(value,
+                CultureInfo.CurrentCulture,
+                DateTimeStyles.None,
+                out DateTime dateValue))
         {
+            double serial = (dateValue - new DateTime(1899, 12, 30)).TotalDays;
             return (
-                new ExtendedValue { NumberValue = numericValue },
+                new ExtendedValue { NumberValue = serial },
                 new CellFormat
                 {
                     NumberFormat = new NumberFormat
                     {
-                        Type = "NUMBER"
+                        Type    = "DATE",
+                        Pattern = "yyyy‑MM‑dd"
                     }
                 }
             );
         }
-
+        
         return (new ExtendedValue { StringValue = value }, null);
     }
 
@@ -186,5 +194,33 @@ public class GSheets
         {
             Log.Error("An error occurred during batch update: {message}. File: {file}", ex.Message, _inputFilePath);
         }
+    }
+    
+    private static bool TryParseFlexibleDecimal(string raw, out decimal result)
+    {
+        result = 0;
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        string s = raw.Trim();
+        
+        if (s.Contains(',') && s.Contains('.'))
+        {
+            s = s.LastIndexOf(',') > s.LastIndexOf('.') ? s.Replace(".", "").Replace(",", ".") : s.Replace(",", "");
+        }
+        else if (s.Contains(','))
+        {
+            int commas = s.Count(c => c == ',');
+            s = (commas == 1) ? s.Replace(",", ".") : s.Replace(",", "");
+        }
+        
+        return decimal.TryParse(
+            s,
+            NumberStyles.AllowDecimalPoint
+            | NumberStyles.AllowThousands
+            | NumberStyles.AllowLeadingSign,
+            CultureInfo.InvariantCulture,
+            out result
+        );
     }
 }
