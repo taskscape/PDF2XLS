@@ -34,7 +34,7 @@ public class GSheets
         int index = 0;
         foreach (char c in columnLetter.ToUpperInvariant())
         {
-            if (c < 'A' || c > 'Z')
+            if (c is < 'A' or > 'Z')
                 return null;
             index = index * 26 + (c - 'A' + 1);
         }
@@ -147,7 +147,7 @@ public class GSheets
 
                 (ExtendedValue extendedValue, CellFormat? cellFormat) = GetExtendedValueAndFormat(value);
 
-                CellData cellData = new CellData
+                CellData cellData = new()
                 {
                     UserEnteredValue = extendedValue
                 };
@@ -157,7 +157,7 @@ public class GSheets
                     cellData.UserEnteredFormat = cellFormat;
                 }
 
-                Request updateCellRequest = new Request
+                Request updateCellRequest = new()
                 {
                     UpdateCells = new UpdateCellsRequest
                     {
@@ -180,7 +180,7 @@ public class GSheets
 
             if (requests.Any())
             {
-                BatchUpdateSpreadsheetRequest batchUpdateRequest = new BatchUpdateSpreadsheetRequest { Requests = requests };
+                BatchUpdateSpreadsheetRequest batchUpdateRequest = new() { Requests = requests };
                 sheetsService.Spreadsheets.BatchUpdate(batchUpdateRequest, _spreadsheetId).Execute();
 
                 Log.Information("Batch update executed successfully. Data appended in row {row}. File: {file}", nextRow, _inputFilePath);

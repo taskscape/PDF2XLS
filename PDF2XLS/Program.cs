@@ -622,7 +622,7 @@ class Program
 
     private static string RunPDF2URL(string exePath, string filePath)
     {
-        var startInfo = new ProcessStartInfo
+        ProcessStartInfo startInfo = new()
         {
             FileName = exePath,
             Arguments = $"\"{filePath}\"",

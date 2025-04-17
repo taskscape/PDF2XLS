@@ -7,7 +7,7 @@ public static class StringHelper
     public static string RemoveLetters(string input)
     {
         string allowedChars = "0123456789.,";
-        string cleaned = new string(input.Where(c => allowedChars.Contains(c)).ToArray());
+        string cleaned = new(input.Where(c => allowedChars.Contains(c)).ToArray());
         return cleaned;
     }
 
@@ -35,7 +35,7 @@ public static class StringHelper
             RegexOptions.IgnoreCase
         );
         
-        Dictionary<string, string> polishReplacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, string> polishReplacements = new(StringComparer.OrdinalIgnoreCase)
         {
             { @"\bsp[oó][łl]ka akcyjna\b", "S.A." },
             { @"\bsp[oó][łl]ka z ograniczon[ąa] odpowiedzialno[śs]ci[ąa]\b", "sp. z o.o." },
@@ -48,7 +48,7 @@ public static class StringHelper
 
         result = polishReplacements.Aggregate(result, (current, rule) => Regex.Replace(current, rule.Key, rule.Value, RegexOptions.IgnoreCase));
 
-        var otherReplacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, string> otherReplacements = new(StringComparer.OrdinalIgnoreCase)
         {
             { @"\blimited\b", "Ltd" },
             { @"\bincorporated\b", "Inc" },

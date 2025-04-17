@@ -76,17 +76,17 @@ public class LLMWhisperer
 
     private async Task<string> GetPdfTextFromWhisperer(string whisperHash)
     {
-        Uri endpoint = new Uri("api/v2/whisper-retrieve", UriKind.Relative);
-        Uri requestUrl = new Uri(_baseUrl, endpoint);
+        Uri endpoint = new("api/v2/whisper-retrieve", UriKind.Relative);
+        Uri requestUrl = new(_baseUrl, endpoint);
 
-        using HttpClient client = new HttpClient();
+        using HttpClient client = new();
         client.DefaultRequestHeaders.Add("unstract-key", _apiKey);
-        Dictionary<string, string?> parameters = new Dictionary<string, string?>
+        Dictionary<string, string?> parameters = new()
         {
             ["whisper_hash"] = whisperHash,
             ["text_only"] = "true"
         };
-        Uri fullRequest = new Uri(QueryHelpers.AddQueryString(requestUrl.ToString(), parameters));
+        Uri fullRequest = new(QueryHelpers.AddQueryString(requestUrl.ToString(), parameters));
         HttpResponseMessage response = await client.GetAsync(fullRequest);
 
         if (response.IsSuccessStatusCode)
@@ -99,12 +99,12 @@ public class LLMWhisperer
 
     private async Task<string> GetWhispererProcessingStatus(string whisperHash)
     {
-        Uri endpoint = new Uri("api/v2/whisper-status", UriKind.Relative);
-        Uri requestUrl = new Uri(_baseUrl, endpoint);
+        Uri endpoint = new("api/v2/whisper-status", UriKind.Relative);
+        Uri requestUrl = new(_baseUrl, endpoint);
 
-        using HttpClient client = new HttpClient();
+        using HttpClient client = new();
         client.DefaultRequestHeaders.Add("unstract-key", _apiKey);
-        Uri fullRequest = new Uri(QueryHelpers.AddQueryString(requestUrl.ToString(), "whisper_hash", whisperHash));
+        Uri fullRequest = new(QueryHelpers.AddQueryString(requestUrl.ToString(), "whisper_hash", whisperHash));
         HttpResponseMessage response = await client.GetAsync(fullRequest);
 
         if (!response.IsSuccessStatusCode) return string.Empty;
@@ -129,15 +129,15 @@ public class LLMWhisperer
 
     private async Task<string> UploadPdfToWhisperer(string pdfFilePath)
     {
-        Uri endpoint = new Uri("api/v2/whisper", UriKind.Relative);
-        Uri requestUrl = new Uri(_baseUrl, endpoint);
+        Uri endpoint = new("api/v2/whisper", UriKind.Relative);
+        Uri requestUrl = new(_baseUrl, endpoint);
 
         byte[] pdfBytes = await File.ReadAllBytesAsync(pdfFilePath);
 
-        using HttpClient client = new HttpClient();
+        using HttpClient client = new();
         client.DefaultRequestHeaders.Add("unstract-key", _apiKey);
 
-        using ByteArrayContent content = new ByteArrayContent(pdfBytes);
+        using ByteArrayContent content = new(pdfBytes);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
 
         HttpResponseMessage response = await client.PostAsync(requestUrl, content);
