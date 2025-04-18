@@ -5,7 +5,6 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text;
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using Google.Apis.Sheets.v4;
 using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json.Linq;
@@ -27,7 +26,7 @@ class Program
     private static string Username { get; set; }
     private static string Password { get; set; }
     private static string PreferredApi { get; set; }
-    private static string OpenAiApiKey { get; set; }
+    private static string OpenAIApiKey { get; set; }
     private static string ResponseSchema { get; set; }
     private static string NuDeltaBaseUrl = "https://www.nudelta.pl/api/v1";
     private static bool DeleteAfter { get; set; }
@@ -36,6 +35,8 @@ class Program
     private static string SeqAppName { get; set; }
     private static bool UploadPDFStatus { get; set; }
     private static string PDF2URLPath { get; set; }
+    private static string OpenAIModel { get; set; }
+    private static string OpenAIPrompt { get; set; }
     private static Guid RunID { get; set; }
     private static string RunTime { get; set; }
 
@@ -63,8 +64,10 @@ class Program
             Username = config["NuDeltaCredentials:Username"] ?? string.Empty;
             Password = config["NuDeltaCredentials:Password"] ?? string.Empty;
             PreferredApi = config["PreferredAPI"] ?? string.Empty;
-            OpenAiApiKey = config["OpenAI_APIKey"] ?? string.Empty;
             ResponseSchema = fileContents;
+            OpenAIApiKey = config["OpenAI:OpenAI_APIKey"] ?? string.Empty;
+            OpenAIModel = config["OpenAI:OpenAI_Model"] ?? string.Empty;
+            OpenAIPrompt = config["OpenAI:Prompt"]?.Replace("{schema}", ResponseSchema) ?? string.Empty;
             DeleteAfter = bool.Parse(config["DeleteFileAfterProcessing"]);
             SeqAddress = config["Seq:ServerAddress"] ?? string.Empty;
             SeqAppName = config["Seq:AppName"] ?? string.Empty;
@@ -339,8 +342,8 @@ class Program
             string? response = PreferredApi switch
             {
                 "NuDelta" => await UploadPdfToNuDelta(NuDeltaBaseUrl, Username, Password, inputFilePath),
-                "OpenAI"  => await UploadPdfToChatGpt(inputFilePath, OpenAiApiKey, ResponseSchema),
-                _         => await UploadPdfToChatGpt(inputFilePath, OpenAiApiKey, ResponseSchema)
+                "OpenAI"  => await UploadPdfToChatGpt(inputFilePath, OpenAIApiKey, ResponseSchema),
+                _         => await UploadPdfToChatGpt(inputFilePath, OpenAIApiKey, ResponseSchema)
             };
 
             Log.Information("Received JSON response from {PreferredApi}. File: {file}", PreferredApi, inputFilePath);
@@ -485,53 +488,9 @@ class Program
 
         AssistantClient? assistantClient = client.GetAssistantClient();
 
-        ClientResult<Assistant>? assistant = await assistantClient.CreateAssistantAsync("gpt-4o-mini", new AssistantCreationOptions
+        ClientResult<Assistant>? assistant = await assistantClient.CreateAssistantAsync(OpenAIModel, new AssistantCreationOptions
         {
-            // TODO: please make this prompt a configuration parameter or a value sources from external config file
-            Instructions = @$"You are a PDF invoice parser. Your task is to analyze a given PDF and output only a valid JSON object (without markdown formatting or any extra text) that strictly adheres to the JSON schema provided below. Use the exact keys as defined in the schema (the keys in your output should not include any additional quotation marks or modifications). If a field isn’t found in the PDF, output an empty string for that field.
-                            To correctly map the PDF content to the JSON fields, use context clues and synonyms from both English and Polish. For fields that are less obvious, consider the following examples (these are only guidelines and not an exhaustive list):
-
-                            • invn: Look for labels like ""Invoice Number"", ""Faktura nr"", ""Nr faktury"", etc.
-                            • reference: Look for terms such as ""Reference"", ""Numer referencyjny"", ""Ref"", etc.
-                            • issue: Look for ""Issue Date"", ""Data wystawienia"", ""Wystawiona"", etc.
-                            • sale: Look for ""Sale Date"", ""Data sprzedaży"", ""Data sprzedaży towaru/usługi"", etc.
-                            • payment: Look for ""Payment Method"", ""Forma płatności"", ""Sposób płatności"", etc.
-                            • maturity: Look for ""Due Date"", ""Termin płatności"", ""Data zapadalności"", etc.
-                            • currency: Look for ""Currency"", ""Waluta"", etc.
-                            • total: Look for ""Total"", ""Suma"", ""Razem"", ""Całkowity"", etc.
-                            • paid: Look for ""Paid"", ""Zapłacono"", ""Kwota zapłacona"", etc.
-                            • left: Look for ""Remaining"", ""Pozostało"", ""Do zapłaty"", etc.
-                            • iban: Look for ""IBAN"", ""Numer IBAN"", etc.
-
-                            For nested objects, use contextual clues:
-                            - seller and buyer:
-                              - nip: Look for ""NIP"", ""VAT ID"", ""Identyfikator podatkowy"".
-                              - name: Look for ""Name"", ""Firma"", ""Nazwa"", ""Company"".
-                              - city: Look for ""City"", ""Miasto"".
-                              - street: Look for ""Street"", ""Ulica"".
-                              - zipcode: Look for ""Zip Code"", ""Kod pocztowy"".
-
-                            - tables → rows: For each row, map the data as follows:
-                              - no: Look for sequence numbers or labels like ""No."", ""Lp"", ""Lp."".
-                              - name: Look for ""Product"", ""Item"", ""Description"", ""Nazwa"", ""Opis"".
-                              - amount: Look for ""Quantity"", ""Ilość"", ""Qty"".
-                              - unit: Look for ""Unit"", ""Jednostka"", ""Unit of measure"".
-                              - priceNetto: Look for ""Net Price"", ""Cena netto"", ""Netto"".
-                              - vat: Look for ""VAT"", ""Stawka VAT"", ""Podatek VAT"".
-                              - valNetto: Look for ""Net Value"", ""Wartość netto"".
-                              - valVat: Look for ""VAT Amount"", ""Wartość VAT"".
-                              - valBrutto: Look for ""Gross Value"", ""Brutto"", ""Kwota brutto"", ""Total Gross"".
-
-                            - tables → total: Map similar fields (i.e. valNetto, valVat, valBrutto) using corresponding clues as above.
-
-                            Remember:
-                            • Your output must be a valid JSON object that exactly follows the schema.
-                            • Do not include any extra keys or additional text.
-                            • If a piece of information is missing in the PDF, simply leave its value as an empty string.
-
-                            Here is the JSON schema to follow: {schema}
-
-                            Now, using these instructions and examples, analyze the PDF and extract the data accordingly.",
+            Instructions = OpenAIPrompt,
             Tools = { new FileSearchToolDefinition() }
         });
 
@@ -587,7 +546,7 @@ class Program
         AsyncRetryPolicy? retryPolicy = Policy
             .Handle<Exception>()
             .WaitAndRetryAsync(
-                retryCount: 10,
+                retryCount: 7,
                 sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
                 onRetry: (exception, timeSpan, retryCount, context) =>
                 {
