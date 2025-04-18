@@ -19,7 +19,6 @@ Inside `appsettings.json`, there are field which you need to fill in:
 - `Username`: Your NuDelta Invoice login username.
 - `Password`: Your NuDelta Invoice login Password.
 - `PreferredAPI`: The API that you want to use. It can either be `NuDelta` or `OpenAI`.
-- `OpenAI_APIKey`: Your OpenAI API token.
 - `GoogleSheets`:
     - `ServiceAccountFile`: Path to your Google Service Account json file.
     - `SpreadsheetId`: ID of your Google Spreadsheet. You can find it by going into your spreadsheet in a browser and copying it from the URL (it comes after /spreadsheets/d/).
@@ -36,6 +35,10 @@ Inside `appsettings.json`, there are field which you need to fill in:
 - `Whisperer`:
     - `BaseUrl`: Base url of the LLMWhisperer's API.
     - `ApiKey`: Your LLMWhisperer API key. Your key must match the correct base url for either Europe or US.
+- `OpenAI`:
+    - `OpenAI_APIKey`: Your OpenAI API token.
+    - `OpenAI_Model`: Which model you want to use. By default (recommended) it's set to `gpt-4o-mini`
+    - `Prompt`: Prompt used for the query. If you want to adjust it, please be wary of the `{schema}` inside it, as this part will get replaced with the actual output schema expected by the program, do not remove it from the prompt.
 
 # Usage
 
