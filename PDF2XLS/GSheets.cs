@@ -107,7 +107,7 @@ public class GSheets
 
     public void AppendRowWithBatchUpdate(
         SheetsService sheetsService,
-        Dictionary<string, string> data,
+        Dictionary<string, string?> data,
         Dictionary<string, string> columnMappings)
     {
         try

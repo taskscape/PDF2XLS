@@ -2,18 +2,22 @@ using System.Text.RegularExpressions;
 
 namespace PDF2XLS.Helpers;
 
-public static class StringHelper
+public static partial class StringHelper
 {
-    public static string? RemoveLetters(string? input)
+    public static string RemoveLetters(string? input)
     {
-        string allowedChars = "0123456789.,";
-        string? cleaned = new(input.Where(c => allowedChars.Contains(c)).ToArray());
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return string.Empty;
+        }
+        const string allowedChars = "0123456789.,";
+        string cleaned = new(input.Where(c => allowedChars.Contains(c)).ToArray());
         return cleaned;
     }
 
     public static bool IsValidHttpUrl(string? url)
     {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri uriResult))
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uriResult))
         {
             return false;
         }
@@ -26,14 +30,9 @@ public static class StringHelper
         if (string.IsNullOrWhiteSpace(companyName))
             return companyName;
         
-        string? result = companyName.Trim();
+        string result = companyName.Trim();
 
-        result = Regex.Replace(
-            result,
-            @"\bsp\.\s*z\.?\s*o\.?o\.?(?!\w)",
-            "sp. z o.o.",
-            RegexOptions.IgnoreCase
-        );
+        result = NormalizeSpZooSuffixRegex().Replace(result, "sp. z o.o.");
         
         Dictionary<string, string> polishReplacements = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -67,4 +66,7 @@ public static class StringHelper
 
         return result;
     }
+
+    [GeneratedRegex(@"\bsp\.\s*z\.?\s*o\.?o\.?(?!\w)", RegexOptions.IgnoreCase, "pl-PL")]
+    private static partial Regex NormalizeSpZooSuffixRegex();
 }

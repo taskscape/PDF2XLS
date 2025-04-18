@@ -19,7 +19,7 @@ public class LLMWhisperer
     public LLMWhisperer(IConfiguration config, Guid runId, string runTime)
     {
         Config = config;
-        _baseUrl = new Uri(Config["Whisperer:BaseUrl"]);
+        _baseUrl = new Uri(Config["Whisperer:BaseUrl"] ?? string.Empty);
         _apiKey = Config["Whisperer:ApiKey"] ?? string.Empty;
         _runId = runId;
         _runTime = runTime;
