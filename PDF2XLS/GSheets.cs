@@ -62,7 +62,7 @@ public class GSheets
         });
     }
     
-    private (ExtendedValue Value, CellFormat? Format) GetExtendedValueAndFormat(string value)
+    private (ExtendedValue Value, CellFormat? Format) GetExtendedValueAndFormat(string? value)
     {
         if (TryParseFlexibleDecimal(value, out decimal decValue))
         {
@@ -128,7 +128,7 @@ public class GSheets
                 for (int i = 0; i < getResponse.Values.Count; i++)
                 {
                     IList<object>? row = getResponse.Values[i];
-                    if (row.Any(cell => cell != null && !string.IsNullOrWhiteSpace(cell.ToString())))
+                    if (row.Any(cell => !string.IsNullOrWhiteSpace(cell.ToString())))
                     {
                         lastNonEmptyRowIndex = i;
                     }
@@ -142,7 +142,7 @@ public class GSheets
             foreach (KeyValuePair<string, string> mapping in columnMappings)
             {
                 if (string.IsNullOrEmpty(mapping.Value) ||
-                    !data.TryGetValue(mapping.Key, out string value) ||
+                    !data.TryGetValue(mapping.Key, out string? value) ||
                     GetColumnIndex(mapping.Value) is not { } columnIndex) continue;
 
                 (ExtendedValue extendedValue, CellFormat? cellFormat) = GetExtendedValueAndFormat(value);
@@ -196,7 +196,7 @@ public class GSheets
         }
     }
     
-    private static bool TryParseFlexibleDecimal(string raw, out decimal result)
+    private static bool TryParseFlexibleDecimal(string? raw, out decimal result)
     {
         result = 0;
         if (string.IsNullOrWhiteSpace(raw))
