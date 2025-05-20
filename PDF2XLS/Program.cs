@@ -478,7 +478,10 @@ class Program
 
         await using (FileStream fileStream = File.OpenRead(filePath))
         {
-            ClientResult<OpenAIFile>? uploadResult = await fileClient.UploadFileAsync(fileStream, Path.GetFileName(filePath), uploadPurpose);
+            string original = Path.GetFileName(filePath);
+            string nameWithLowerExt = Path.GetFileNameWithoutExtension(original) + Path.GetExtension(original).ToLowerInvariant();
+
+            ClientResult<OpenAIFile>? uploadResult = await fileClient.UploadFileAsync(fileStream, nameWithLowerExt, uploadPurpose);
             fileId = uploadResult.Value.Id;
             Console.WriteLine($"File uploaded successfully. File ID: {fileId}");
             Log.Information("File uploaded to OpenAI. File ID: {FileId}. File: {file}", fileId, filePath);
