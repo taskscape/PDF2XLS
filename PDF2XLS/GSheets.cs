@@ -12,6 +12,7 @@ public class GSheets
     private IConfiguration Config { get; }
     private readonly string _serviceAccountFile;
     private readonly string _spreadsheetId;
+    private readonly string _expectedSpreadsheetName;
     private readonly string _sheetName;
     private readonly string _applicationName;
     private readonly string _inputFilePath;
@@ -21,6 +22,7 @@ public class GSheets
         Config = config;
         _serviceAccountFile = Config["GoogleSheets:ServiceAccountFile"] ?? string.Empty;
         _spreadsheetId = Config["GoogleSheets:SpreadsheetId"] ?? string.Empty;
+        _expectedSpreadsheetName = Config["GoogleSheets:ExpectedSpreadsheetName"] ?? string.Empty;
         _sheetName = Config["GoogleSheets:SheetName"] ?? string.Empty;
         _applicationName = Config["GoogleSheets:ApplicationName"] ?? string.Empty;
         _inputFilePath = inputFilePath;
@@ -47,6 +49,26 @@ public class GSheets
         Sheet? sheet = spreadsheet.Sheets.FirstOrDefault(s =>
             s.Properties.Title.Equals(_sheetName, StringComparison.OrdinalIgnoreCase));
         return sheet?.Properties.SheetId;
+    }
+
+    public bool VerifySpreadsheetName(SheetsService sheetsService)
+    {
+        if (string.IsNullOrEmpty(_expectedSpreadsheetName))
+            return true;
+
+        Spreadsheet? spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
+        string actualName = spreadsheet.Properties.Title;
+
+        if (!string.Equals(actualName, _expectedSpreadsheetName, StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Error(
+                "Spreadsheet name mismatch. Expected: '{Expected}', Actual: '{Actual}'. SpreadsheetId: {Id}",
+                _expectedSpreadsheetName, actualName, _spreadsheetId);
+            return false;
+        }
+
+        Log.Information("Spreadsheet name verified: '{Name}'", actualName);
+        return true;
     }
 
     public SheetsService CreateSheetsService()

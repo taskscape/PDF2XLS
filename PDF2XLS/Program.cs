@@ -89,6 +89,16 @@ class Program
                 return;
             }
 
+            // ── Spreadsheet name verification ───────────────────────────────
+            GSheets sheetsValidator = new(config, string.Empty);
+            SheetsService sheetsService = sheetsValidator.CreateSheetsService();
+            if (!sheetsValidator.VerifySpreadsheetName(sheetsService))
+            {
+                Console.WriteLine("Spreadsheet name mismatch — application cannot proceed. Check 'GoogleSheets:ExpectedSpreadsheetName' in appsettings.json.");
+                Log.Error("Application aborted due to spreadsheet name mismatch.");
+                return;
+            }
+
             // ── Input: accept file or folder ────────────────────────────────
             string input = args[0];
             List<string> filesToProcess;
