@@ -138,21 +138,25 @@ On startup the program creates a `logs/` subfolder next to the executable and wr
 When `DeleteFileAfterProcessing` is `"false"` and the Google Sheets write succeeds, the original PDF is renamed in-place using the following convention:
 
 ```
-{RunTime}_{RunID}_{OriginalFileName}.bak
+{RunTime} {RunID} {OriginalFileName}.bak
 ```
 
 | Part | Format | Details |
 |---|---|---|
-| `RunTime` | `yyyyMMdd HHmmss` | UTC timestamp of application start. Set once for the whole batch run. |
-| `RunID` | GUID | A new unique ID generated per file. Also written to the Google Sheet (column mapped to `RunID`). |
-| `OriginalFileName` | — | The original filename, unchanged. |
+| `RunTime` | `yyyyMMdd HHmmss` | UTC timestamp of application start (UTC). Set once per batch run; all files in the same run share this value. |
+| `RunID` | GUID | A unique ID generated for **each file**. Also written to the Google Sheet (column mapped to `RunID`). |
+| `OriginalFileName` | — | The original filename, unchanged, including its extension. |
 | `.bak` | — | Fixed suffix appended after the original extension. |
+
+All three parts are separated by a **single space**. There are no underscores in the filename.
 
 **Example:**
 
 ```
-20260517 013221_48070c04-bce5-4205-8ee7-ff506c8f2533_invoice-001.pdf.bak
+20260517 013221 48070c04-bce5-4205-8ee7-ff506c8f2533 invoice-001.pdf.bak
 ```
+
+> **Why spaces?** Spaces make the three logical parts visually distinct without requiring a special delimiter character. The GUID already contains hyphens internally, so using an underscore as a separator would be ambiguous when splitting the name programmatically. Spaces allow a simple `Split(' ', 3)` to recover `RunTime`, `RunID`, and `OriginalFileName` unambiguously.
 
 The file is left untouched if processing fails or the Google Sheets write does not succeed.
 

@@ -328,7 +328,7 @@ class Program
             {
                 string bakPath = Path.Combine(
                     Path.GetDirectoryName(inputFilePath)!,
-                    $"{RunTime}_{RunID}_{Path.GetFileName(inputFilePath)}.bak");
+                    $"{RunTime} {RunID} {Path.GetFileName(inputFilePath)}.bak");
                 File.Move(inputFilePath, bakPath);
                 Log.Information("File archived as: {BakFile}", Path.GetFileName(bakPath));
             }
