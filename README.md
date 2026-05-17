@@ -142,7 +142,7 @@ PDF2XLS.exe "C:\invoices\2026-05\"
 - Files are processed **in alphabetical order**, one by one.
 - Each file gets its own unique **RunID** (GUID), but they all share the same **RunTime** timestamp.
 - Each processed file is appended as a separate row in the Google Sheet.
-- The rename/delete behavior controlled by `DeleteFileAfterProcessing` applies to each file individually after it succeeds.
+- Each processed file is renamed to `.bak` after it succeeds.
 - If a file fails, it is **left untouched** and processing continues with the next file.
 - If the folder contains no PDF files, the app exits with a warning message.
 
@@ -152,7 +152,7 @@ On startup the program creates a `logs/` subfolder next to the executable and wr
 
 ## Processed file naming
 
-When `DeleteFileAfterProcessing` is `"false"` and the Google Sheets write succeeds, the original PDF is renamed in-place using the following convention:
+When the Google Sheets write succeeds, the original PDF is renamed in-place using the following convention:
 
 ```
 {RunTime} {RunID} {OriginalFileName}.bak
