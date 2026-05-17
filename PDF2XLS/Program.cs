@@ -14,7 +14,6 @@ class Program
 {
     private static string PreferredApi { get; set; } = string.Empty;
     private static string ResponseSchema { get; set; } = string.Empty;
-    private static bool DeleteAfter { get; set; }
     private static Dictionary<string, string> Mappings { get; set; } = new();
     private static string SeqAddress { get; set; } = string.Empty;
     private static string SeqAppName { get; set; } = string.Empty;
@@ -43,7 +42,6 @@ class Program
             ResponseSchema = await schemaReader.ReadToEndAsync();
 
             PreferredApi    = config["PreferredAPI"] ?? string.Empty;
-            DeleteAfter     = bool.Parse(config["DeleteFileAfterProcessing"] ?? "false");
             SeqAddress      = config["Seq:ServerAddress"] ?? string.Empty;
             SeqAppName      = config["Seq:AppName"] ?? string.Empty;
             UploadPDFStatus = bool.Parse(config["UploadPDF:Enabled"] ?? "false");
@@ -318,11 +316,6 @@ class Program
             if (!sheetsSuccess)
             {
                 Log.Warning("Google Sheets write failed — file will NOT be archived. File: {file}", inputFilePath);
-            }
-            else if (DeleteAfter)
-            {
-                File.Delete(inputFilePath);
-                Log.Information("File deleted after processing. File: {file}", inputFilePath);
             }
             else
             {

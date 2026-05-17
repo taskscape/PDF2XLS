@@ -100,7 +100,7 @@ If you don't have a Seq server, leave the address empty — the file logs under 
 
 1. Download the latest release and unpack it into a folder.
 2. Open [appsettings.json](PDF2XLS/appsettings.json) and fill in:
-    - **Always:** `PreferredAPI`, `GoogleSheets.*`, `DeleteFileAfterProcessing`.
+    - **Always:** `PreferredAPI`, `GoogleSheets.*`.
     - **Workflow-specific** (only for the workflow you chose — see above).
     - **Optional:** `UploadPDF.*`, `Seq.*`.
 
@@ -109,8 +109,7 @@ If you don't have a Seq server, leave the address empty — the file logs under 
 | Section | Key | Required for | Description |
 |---|---|---|---|
 | (root) | `PreferredAPI` | All | `NuDelta`, `OpenAIResponses`, or `AzureDocumentIntelligence`. |
-| (root) | `DeleteFileAfterProcessing` | All | `"true"` deletes the processed PDF; `"false"` keeps it. |
-| `NuDeltaCredentials` | `Username`, `Password` | NuDelta | NuDelta portal credentials (HTTP Basic auth). |
+| `NuDeltaCredentials`
 | `OpenAI` | `OpenAI_APIKey`, `OpenAI_Model`, `Prompt` | OpenAIResponses | OpenAI key, model id, and prompt containing `{schema}`. |
 | `AzureDocumentIntelligence` | `Endpoint`, `ApiKey` | AzureDocumentIntelligence | Azure Document Intelligence endpoint and key. |
 | `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `ExpectedSpreadsheetName`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `ExpectedSpreadsheetName` is verified against the live spreadsheet title at startup; leave blank to skip the check. `Mappings` values are spreadsheet **column letters**. |
@@ -121,13 +120,31 @@ If you don't have a Seq server, leave the address empty — the file logs under 
 
 # Usage
 
-This is a CLI application. Pass the path to the PDF invoice as the first argument, or drag-and-drop the PDF onto the executable.
+This is a CLI application. Pass the path to a PDF invoice **or a folder** as the first argument, or drag-and-drop the PDF (or folder) onto the executable.
+
+## Processing a single file
 
 ```
 PDF2XLS.exe "C:\invoices\invoice-001.pdf"
 ```
 
 The selected workflow processes the file, parses the response into the internal schema, and appends a row to the configured Google Sheet.
+
+## Processing a folder
+
+Pass a folder path to process all PDF files inside it:
+
+```
+PDF2XLS.exe "C:\invoices\2026-05\"
+```
+
+- The app scans for **all `.pdf` files** in the folder (top-level only — subfolders are not scanned).
+- Files are processed **in alphabetical order**, one by one.
+- Each file gets its own unique **RunID** (GUID), but they all share the same **RunTime** timestamp.
+- Each processed file is appended as a separate row in the Google Sheet.
+- The rename/delete behavior controlled by `DeleteFileAfterProcessing` applies to each file individually after it succeeds.
+- If a file fails, it is **left untouched** and processing continues with the next file.
+- If the folder contains no PDF files, the app exits with a warning message.
 
 # Logging
 
