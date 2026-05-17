@@ -75,7 +75,7 @@ Then, depending on the workflow:
 5. Copy **KEY 1** into `AzureDocumentIntelligence:ApiKey`.
 6. This workflow uses the **`prebuilt-invoice`** model, which is built into the service — you do not need to train anything. It is available in all regions that support Document Intelligence v4.
 
-> Note: Document Intelligence is deterministic and returns structured fields directly, so there is no retry loop or LLM fallback. It does not use OpenAI.
+> Note: Document Intelligence is deterministic and returns structured fields directly. It does not use OpenAI.
 
 ## 5. Optional: PDF upload to a public URL
 
@@ -113,7 +113,7 @@ If you don't have a Seq server, leave the address empty — the file logs under 
 | `NuDeltaCredentials` | `Username`, `Password` | NuDelta | NuDelta portal credentials (HTTP Basic auth). |
 | `OpenAI` | `OpenAI_APIKey`, `OpenAI_Model`, `Prompt` | OpenAIResponses | OpenAI key, model id, and prompt containing `{schema}`. |
 | `AzureDocumentIntelligence` | `Endpoint`, `ApiKey` | AzureDocumentIntelligence | Azure Document Intelligence endpoint and key. |
-| `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `Mappings` values are spreadsheet **column letters**. |
+| `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `ExpectedSpreadsheetName`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `ExpectedSpreadsheetName` is verified against the live spreadsheet title at startup; leave blank to skip the check. `Mappings` values are spreadsheet **column letters**. |
 | `UploadPDF` | `Enabled`, `PDF2URLPath` | Optional | Enable to upload the PDF and store the link in `DocumentLink`. |
 | `Seq` | `ServerAddress`, `AppName` | Optional | Centralised Seq logging. |
 
@@ -158,6 +158,48 @@ The file is left untouched if processing fails or the Google Sheets write does n
 
 # Notes per workflow
 
-- **NuDelta** — retries up to 5 times with a 1-second delay while the document status is `processing`. If all retries fail, the file is skipped and the error is logged.
-- **OpenAIResponses** — retries on HTTP 429 / 5xx with exponential backoff (3 attempts). Output quality depends on the model; results can vary between runs.
-- **AzureDocumentIntelligence** — single deterministic call (the Azure SDK handles transient retries internally). Output is the most consistent of the three because fields come from a trained invoice model rather than a generative LLM.
+- **NuDelta** — polls for the result with exponential backoff (up to 5 attempts, 1-second base delay). The outer operation also retries on exception with a 1-second delay (up to 5 attempts).
+- **OpenAIResponses** — the inner HTTP client retries on HTTP 429 / 5xx with exponential backoff (3 attempts). The outer operation also retries on exception with exponential backoff (3 attempts).
+- **AzureDocumentIntelligence** — retries on exception with exponential backoff (3 attempts, 2 s → 4 s → 8 s). The Azure SDK additionally handles low-level transient HTTP errors.
+
+---
+
+# Resilience — timeouts and retries
+
+The application is designed so that a network outage or a service disruption during any stage of processing always leaves the source file untouched. The next run will pick it up and try again.
+
+## File-safety guarantee
+
+A file is only renamed/deleted **after all of the following have succeeded**:
+1. PDF extraction (NuDelta / OpenAI / Azure DI)
+2. PDF upload to public URL *(if `UploadPDF:Enabled` is `"true"`)*
+3. Google Sheets row write
+
+If any step fails — even after all retries are exhausted — the file stays in place.
+
+## Timeouts
+
+| Layer | Timeout | Behaviour on expiry |
+|---|---|---|
+| **Azure DI polling** | 5 minutes | `OperationCanceledException` thrown; retried by outer policy (up to 3×) |
+| **NuDelta HTTP client** (upload + poll requests) | 5 minutes per request | `TaskCanceledException` thrown; propagates to outer retry policy |
+| **OpenAI HTTP client** | 5 minutes per request | `TaskCanceledException` thrown; propagates to outer retry policy |
+| **Google Sheets API calls** (all three calls per write) | 5 minutes per call | `OperationCanceledException` thrown; propagates as a write failure — file stays |
+| **PDF2URL process** | 5 minutes | Process is killed; empty URL returned → write not attempted → file stays |
+
+## Retry policies
+
+| Workflow / stage | Retries | Delay strategy | What triggers a retry |
+|---|---|---|---|
+| **NuDelta outer** (whole operation) | up to 5 | 1 s fixed | Any exception except `OperationCanceledException` |
+| **NuDelta inner** (result polling) | up to 5 | Exponential (`2^n` s) | Document state is not `done` |
+| **OpenAI outer** (whole operation) | up to 3 | Exponential (`2^n` s) | Any exception except `OperationCanceledException` |
+| **OpenAI inner** (HTTP call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx or HTTP 429 |
+| **Azure DI** (whole operation) | up to 3 | Exponential (`2^n` s) | Any exception except `OperationCanceledException` |
+| **Google Sheets** (each API call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx, HTTP 429, `HttpRequestException`, `IOException` |
+
+`OperationCanceledException` is never retried in any policy — it signals an intentional 5-minute timeout and should propagate immediately so the file is left untouched for the next run.
+
+## Spreadsheet name verification
+
+Before processing any files the application fetches the spreadsheet title and compares it to `GoogleSheets:ExpectedSpreadsheetName`. If the names do not match, or if the API call fails after 3 retries, the application logs the error and exits without processing any files. This prevents writing data to the wrong spreadsheet when `SpreadsheetId` is misconfigured.
