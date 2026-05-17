@@ -105,7 +105,7 @@ public class GSheets
         return (new ExtendedValue { StringValue = value }, null);
     }
 
-    public void AppendRowWithBatchUpdate(
+    public bool AppendRowWithBatchUpdate(
         SheetsService sheetsService,
         Dictionary<string, string?> data,
         Dictionary<string, string> columnMappings)
@@ -116,7 +116,7 @@ public class GSheets
             if (sheetId == null)
             {
                 Log.Error("Sheet {sheetName} not found in spreadsheet {spreadsheetId}", _sheetName, _spreadsheetId);
-                return;
+                return false;
             }
             
             string range = $"{_sheetName}!A:Z";
@@ -184,15 +184,18 @@ public class GSheets
                 sheetsService.Spreadsheets.BatchUpdate(batchUpdateRequest, _spreadsheetId).Execute();
 
                 Log.Information("Batch update executed successfully. Data appended in row {row}. File: {file}", nextRow, _inputFilePath);
+                return true;
             }
             else
             {
                 Log.Warning("No data to update for the specified mappings. File: {file}", _inputFilePath);
+                return false;
             }
         }
         catch (Exception ex)
         {
             Log.Error("An error occurred during batch update: {message}. File: {file}", ex.Message, _inputFilePath);
+            return false;
         }
     }
     
