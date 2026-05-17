@@ -39,6 +39,7 @@ public class NuDeltaProcessor
         try
         {
             using HttpClient client = new();
+            client.Timeout = TimeSpan.FromMinutes(5);
             string authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{_username}:{_password}"));
             client.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Basic", authToken);
@@ -95,6 +96,7 @@ public class NuDeltaProcessor
         try
         {
             using HttpClient client = new();
+            client.Timeout = TimeSpan.FromMinutes(5);
             string authToken = Convert.ToBase64String(Encoding.ASCII.GetBytes($"{_username}:{_password}"));
             client.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Basic", authToken);

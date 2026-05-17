@@ -40,9 +40,12 @@ public class AzureDocumentIntelligenceProcessor
             Log.Information("Submitting PDF to Azure Document Intelligence. File: {file}", filePath);
 
             Operation<AnalyzeResult> operation = await client.AnalyzeDocumentAsync(
-                WaitUntil.Completed,
+                WaitUntil.Started,
                 "prebuilt-invoice",
                 pdfData);
+
+            using CancellationTokenSource pollCts = new(TimeSpan.FromMinutes(5));
+            await operation.WaitForCompletionAsync(pollCts.Token);
 
             AnalyzeResult result = operation.Value;
 

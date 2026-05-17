@@ -2,6 +2,8 @@ using Google.Apis.Auth.OAuth2;
 using Google.Apis.Sheets.v4;
 using Google.Apis.Sheets.v4.Data;
 using Microsoft.Extensions.Configuration;
+using Polly;
+using Polly.Retry;
 using Serilog;
 using System.Globalization;
 
@@ -9,6 +11,19 @@ namespace PDF2XLS;
 
 public class GSheets
 {
+    // Retry on transient Google API failures (5xx, 429) and network errors.
+    // OperationCanceledException (our 5-min timeout) is intentionally excluded.
+    private static readonly AsyncRetryPolicy SheetsRetryPolicy = Policy
+        .Handle<Google.GoogleApiException>(ex => (int)ex.HttpStatusCode >= 500 || (int)ex.HttpStatusCode == 429)
+        .Or<HttpRequestException>()
+        .Or<IOException>()
+        .WaitAndRetryAsync(
+            retryCount: 3,
+            sleepDurationProvider: attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)),
+            onRetry: (ex, ts, attempt, _) =>
+                Log.Warning(ex, "Google Sheets transient error. Retry {Attempt} after {Delay:F1}s",
+                    attempt, ts.TotalSeconds));
+
     private IConfiguration Config { get; }
     private readonly string _serviceAccountFile;
     private readonly string _spreadsheetId;
@@ -43,32 +58,45 @@ public class GSheets
         return index - 1;
     }
 
-    private int? GetSheetId(SheetsService sheetsService)
+    private async Task<int?> GetSheetIdAsync(SheetsService sheetsService, CancellationToken cancellationToken)
     {
-        Spreadsheet? spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
+        Spreadsheet? spreadsheet = await sheetsService.Spreadsheets.Get(_spreadsheetId).ExecuteAsync(cancellationToken);
         Sheet? sheet = spreadsheet.Sheets.FirstOrDefault(s =>
             s.Properties.Title.Equals(_sheetName, StringComparison.OrdinalIgnoreCase));
         return sheet?.Properties.SheetId;
     }
 
-    public bool VerifySpreadsheetName(SheetsService sheetsService)
+    public async Task<bool> VerifySpreadsheetName(SheetsService sheetsService)
     {
         if (string.IsNullOrEmpty(_expectedSpreadsheetName))
             return true;
 
-        Spreadsheet? spreadsheet = sheetsService.Spreadsheets.Get(_spreadsheetId).Execute();
-        string actualName = spreadsheet.Properties.Title;
-
-        if (!string.Equals(actualName, _expectedSpreadsheetName, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            Log.Error(
-                "Spreadsheet name mismatch. Expected: '{Expected}', Actual: '{Actual}'. SpreadsheetId: {Id}",
-                _expectedSpreadsheetName, actualName, _spreadsheetId);
+            using CancellationTokenSource cts = new(TimeSpan.FromMinutes(5));
+
+            Spreadsheet? spreadsheet = await SheetsRetryPolicy.ExecuteAsync(
+                ct => sheetsService.Spreadsheets.Get(_spreadsheetId).ExecuteAsync(ct),
+                cts.Token);
+
+            string actualName = spreadsheet.Properties.Title;
+
+            if (!string.Equals(actualName, _expectedSpreadsheetName, StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Error(
+                    "Spreadsheet name mismatch. Expected: '{Expected}', Actual: '{Actual}'. SpreadsheetId: {Id}",
+                    _expectedSpreadsheetName, actualName, _spreadsheetId);
+                return false;
+            }
+
+            Log.Information("Spreadsheet name verified: '{Name}'", actualName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to verify spreadsheet name after retries. SpreadsheetId: {Id}", _spreadsheetId);
             return false;
         }
-
-        Log.Information("Spreadsheet name verified: '{Name}'", actualName);
-        return true;
     }
 
     public SheetsService CreateSheetsService()
@@ -127,23 +155,31 @@ public class GSheets
         return (new ExtendedValue { StringValue = value }, null);
     }
 
-    public bool AppendRowWithBatchUpdate(
+    public async Task<bool> AppendRowWithBatchUpdate(
         SheetsService sheetsService,
         Dictionary<string, string?> data,
         Dictionary<string, string> columnMappings)
     {
         try
         {
-            int? sheetId = GetSheetId(sheetsService);
+            using CancellationTokenSource cts = new(TimeSpan.FromMinutes(5));
+            CancellationToken ct = cts.Token;
+
+            int? sheetId = await SheetsRetryPolicy.ExecuteAsync(
+                token => GetSheetIdAsync(sheetsService, token),
+                ct);
+
             if (sheetId == null)
             {
                 Log.Error("Sheet {sheetName} not found in spreadsheet {spreadsheetId}", _sheetName, _spreadsheetId);
                 return false;
             }
-            
+
             string range = $"{_sheetName}!A:Z";
-            SpreadsheetsResource.ValuesResource.GetRequest? getRequest = sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range);
-            ValueRange getResponse = getRequest.Execute();
+            ValueRange getResponse = await SheetsRetryPolicy.ExecuteAsync(
+                token => sheetsService.Spreadsheets.Values.Get(_spreadsheetId, range).ExecuteAsync(token),
+                ct);
+
             int lastNonEmptyRowIndex = -1;
             if (getResponse.Values != null)
             {
@@ -156,8 +192,8 @@ public class GSheets
                     }
                 }
             }
-            
-            int nextRow = lastNonEmptyRowIndex + 2; 
+
+            int nextRow = lastNonEmptyRowIndex + 2;
 
             List<Request> requests = [];
 
@@ -173,7 +209,7 @@ public class GSheets
                 {
                     UserEnteredValue = extendedValue
                 };
-                
+
                 if (cellFormat != null)
                 {
                     cellData.UserEnteredFormat = cellFormat;
@@ -203,7 +239,9 @@ public class GSheets
             if (requests.Any())
             {
                 BatchUpdateSpreadsheetRequest batchUpdateRequest = new() { Requests = requests };
-                sheetsService.Spreadsheets.BatchUpdate(batchUpdateRequest, _spreadsheetId).Execute();
+                await SheetsRetryPolicy.ExecuteAsync(
+                    token => sheetsService.Spreadsheets.BatchUpdate(batchUpdateRequest, _spreadsheetId).ExecuteAsync(token),
+                    ct);
 
                 Log.Information("Batch update executed successfully. Data appended in row {row}. File: {file}", nextRow, _inputFilePath);
                 return true;

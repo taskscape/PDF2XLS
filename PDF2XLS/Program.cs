@@ -92,7 +92,7 @@ class Program
             // ── Spreadsheet name verification ───────────────────────────────
             GSheets sheetsValidator = new(config, string.Empty);
             SheetsService sheetsService = sheetsValidator.CreateSheetsService();
-            if (!sheetsValidator.VerifySpreadsheetName(sheetsService))
+            if (!await sheetsValidator.VerifySpreadsheetName(sheetsService))
             {
                 Console.WriteLine("Spreadsheet name mismatch — application cannot proceed. Check 'GoogleSheets:ExpectedSpreadsheetName' in appsettings.json.");
                 Log.Error("Application aborted due to spreadsheet name mismatch.");
@@ -175,7 +175,7 @@ class Program
                     NuDeltaProcessor nuDeltaProcessor = new(config);
 
                     AsyncRetryPolicy retryPolicy = Policy
-                        .Handle<Exception>()
+                        .Handle<Exception>(ex => ex is not OperationCanceledException)
                         .WaitAndRetryAsync(
                             retryCount: 5,
                             sleepDurationProvider: _ => TimeSpan.FromSeconds(1),
@@ -201,7 +201,7 @@ class Program
 
                         if (UploadPDFStatus)
                         {
-                            documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
+                            documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
                             if (!StringHelper.IsValidHttpUrl(documentLink))
                                 throw new Exception("Document failed to upload");
                             Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
@@ -217,7 +217,7 @@ class Program
                     OpenAIResponsesProcessor openAIProcessor = new(config, ResponseSchema);
 
                     AsyncRetryPolicy openAIRetry = Policy
-                        .Handle<Exception>()
+                        .Handle<Exception>(ex => ex is not OperationCanceledException)
                         .WaitAndRetryAsync(
                             retryCount: 3,
                             sleepDurationProvider: attempt =>
@@ -244,7 +244,7 @@ class Program
 
                         if (UploadPDFStatus)
                         {
-                            documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
+                            documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
                             if (!StringHelper.IsValidHttpUrl(documentLink))
                                 throw new Exception("Document failed to upload");
                             Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
@@ -258,22 +258,41 @@ class Program
                 case "AzureDocumentIntelligence":
                 {
                     AzureDocumentIntelligenceProcessor azDIProcessor = new(config);
-                    string? r = await azDIProcessor.ProcessPdfAsync(inputFilePath);
 
-                    root = r != null ? JsonNode.Parse(r) : null;
-                    if (root == null)
-                    {
-                        throw new InvalidOperationException(
-                            "Azure Document Intelligence returned no result");
-                    }
+                    AsyncRetryPolicy azDIRetry = Policy
+                        .Handle<Exception>(ex => ex is not OperationCanceledException)
+                        .WaitAndRetryAsync(
+                            retryCount: 3,
+                            sleepDurationProvider: attempt =>
+                                TimeSpan.FromSeconds(Math.Pow(2, attempt)),
+                            onRetry: (ex, ts, count, _) =>
+                            {
+                                Console.WriteLine(
+                                    $"Retry {count} after {ts.TotalSeconds}s due to: {ex.Message}");
+                                Log.Warning(ex,
+                                    "Azure Document Intelligence retry {Count} after {Delay}s. File: {file}",
+                                    count, ts.TotalSeconds, inputFilePath);
+                            });
 
-                    if (UploadPDFStatus)
+                    await azDIRetry.ExecuteAsync(async () =>
                     {
-                        documentLink = RunPDF2URL(PDF2URLPath, inputFilePath);
-                        if (!StringHelper.IsValidHttpUrl(documentLink))
-                            throw new Exception("Document failed to upload");
-                        Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
-                    }
+                        string? r = await azDIProcessor.ProcessPdfAsync(inputFilePath);
+
+                        root = r != null ? JsonNode.Parse(r) : null;
+                        if (root == null)
+                        {
+                            throw new InvalidOperationException(
+                                "Azure Document Intelligence returned no result");
+                        }
+
+                        if (UploadPDFStatus)
+                        {
+                            documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
+                            if (!StringHelper.IsValidHttpUrl(documentLink))
+                                throw new Exception("Document failed to upload");
+                            Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
+                        }
+                    });
 
                     break;
                 }
@@ -294,7 +313,7 @@ class Program
                 data.GetValueOrDefault("Currency"),
                 Path.GetFileName(inputFilePath));
 
-            bool sheetsSuccess = sheets.AppendRowWithBatchUpdate(sheetsService, data, Mappings);
+            bool sheetsSuccess = await sheets.AppendRowWithBatchUpdate(sheetsService, data, Mappings);
 
             if (!sheetsSuccess)
             {
@@ -329,7 +348,7 @@ class Program
         }
     }
 
-    private static string RunPDF2URL(string exePath, string filePath)
+    private static async Task<string> RunPDF2URL(string exePath, string filePath)
     {
         ProcessStartInfo startInfo = new()
         {
@@ -341,14 +360,25 @@ class Program
         };
 
         using var process = Process.Start(startInfo);
-        string output = process?.StandardOutput.ReadToEnd() ?? string.Empty;
+        if (process == null) return string.Empty;
 
-        process?.WaitForExit();
+        // Read stdout asynchronously to avoid pipe-buffer deadlock with WaitForExit.
+        Task<string> readTask = process.StandardOutput.ReadToEndAsync();
 
-        if (process?.ExitCode != 0)
+        bool exited = process.WaitForExit(300_000); // 5-minute timeout
+        if (!exited)
+        {
+            try { process.Kill(); } catch { /* best effort */ }
+            Log.Warning("PDF2URL process timed out after 5 minutes and was killed. File: {file}", filePath);
+            return string.Empty;
+        }
+
+        string output = await readTask;
+
+        if (process.ExitCode != 0)
         {
             Log.Warning("PDF2URL exited with code {Code}. Output: {Output}. File: {file}",
-                process?.ExitCode, output.TrimEnd(), filePath);
+                process.ExitCode, output.TrimEnd(), filePath);
             return string.Empty;
         }
 
