@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build single-file executable
+    runs-on: windows-latest
+
+    env:
+      PROJECT: PDF2XLS/PDF2XLS.csproj
+      RUNTIME: win-x64
+      CONFIGURATION: Release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT }} -r ${{ env.RUNTIME }}
+
+      - name: Publish single-file, startup-optimized executable
+        run: >
+          dotnet publish ${{ env.PROJECT }}
+          -c ${{ env.CONFIGURATION }}
+          -r ${{ env.RUNTIME }}
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:PublishReadyToRun=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none
+          -p:Version=${{ github.ref_name }}
+          -o publish
+
+      - name: Package release archive
+        shell: pwsh
+        run: |
+          $zip = "PDF2XLS-${{ github.ref_name }}-${{ env.RUNTIME }}.zip"
+          Compress-Archive -Path publish/* -DestinationPath $zip -Force
+          "ASSET=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create ${{ github.ref_name }} ${{ env.ASSET }}
+          --title ${{ github.ref_name }}
+          --generate-notes
