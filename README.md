@@ -99,8 +99,13 @@ If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file log
 
 # Installation
 
-1. Download the latest release and unpack it into a folder.
-2. Open [appsettings.json](PDF2XLS/appsettings.json) and fill in:
+## Download a release
+
+1. Open the [GitHub Releases](https://github.com/taskscape/PDF2XLS/releases) page and download the latest `PDF2XLS-<version>-win-x64.zip` asset.
+2. Unpack the archive into a folder. It contains:
+   - `PDF2XLS.exe` — self-contained, single-file executable (64-bit Windows)
+   - `appsettings.json` — configuration file (kept alongside the executable so you can edit it without rebuilding)
+3. Open `appsettings.json` and fill in:
     - **Always:** `PreferredAPI`, `GoogleSheets.*`.
     - **Workflow-specific** (only for the workflow you chose — see above).
     - **Optional:** `UploadPDF.*`, `Seq.*`.
@@ -110,7 +115,7 @@ If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file log
 | Section | Key | Required for | Description |
 |---|---|---|---|
 | (root) | `PreferredAPI` | All | `NuDelta`, `OpenAIResponses`, or `AzureDocumentIntelligence`. |
-| `NuDeltaCredentials`
+| `NuDeltaCredentials` | `Username`, `Password` | NuDelta | NuDelta Invoice portal login (HTTP Basic auth). |
 | `OpenAI` | `OpenAI_APIKey`, `OpenAI_Model`, `Prompt` | OpenAIResponses | OpenAI key, model id, and prompt containing `{schema}`. |
 | `AzureDocumentIntelligence` | `Endpoint`, `ApiKey` | AzureDocumentIntelligence | Azure Document Intelligence endpoint and key. |
 | `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `ExpectedSpreadsheetName`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `ExpectedSpreadsheetName` is verified against the live spreadsheet title at startup; leave blank to skip the check. `Mappings` values are spreadsheet **column letters**. |
@@ -122,6 +127,10 @@ If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file log
 # Usage
 
 This is a CLI application. Pass one or more PDF file paths, or a folder path, as arguments. You can also drag-and-drop a PDF (or folder) onto the executable.
+
+```
+PDF2XLS.exe <file.pdf> [file2.pdf ...] | <folder path>
+```
 
 ## Processing a single file
 
@@ -151,16 +160,28 @@ PDF2XLS.exe "C:\invoices\2026-05\"
 ```
 
 - The app scans for **all `.pdf` files** in the folder (top-level only — subfolders are not scanned).
-- Files are processed **in alphabetical order**, one by one.
+- Files are processed **in alphabetical order**.
+
+## Batch behaviour (all input modes)
+
+When more than one file is processed in a single application run (multiple CLI paths or a folder):
+
 - Each file gets its own unique **RunID** (GUID), but they all share the same **RunTime** timestamp.
 - Each processed file is appended as a separate row in the Google Sheet.
 - Each processed file is renamed to `.bak` after it succeeds.
 - If a file fails, it is **left untouched** and processing continues with the next file.
-- If the folder contains no PDF files, the app exits with a warning message.
+- If a folder contains no PDF files, the app exits with a warning message.
 
 # Logging
 
-On startup the program creates a `logs/` subfolder next to the executable and writes a daily rolling log file (365 days retained). If `Seq:ServerAddress` is set, it also forwards events to Seq using the configured API key. After each PDF file finishes processing (success or failure), buffered log events are flushed to both the local file and Seq before the next file starts.
+On startup the program creates a `logs/` subfolder next to the executable and writes a daily rolling log file (365 days retained, up to 365 files).
+
+If `Seq:ServerAddress` is set, events are also forwarded to Seq using the configured `Seq:ApiKey`. After each PDF file finishes processing (success or failure), buffered log events are flushed to both the local file and Seq before the next file starts.
+
+| Destination | When active | Notes |
+|---|---|---|
+| Local file | Always | `{exe}/logs/log-YYYYMMDD.txt` |
+| Seq | When `Seq:ServerAddress` is configured | Requires `Seq:ApiKey` |
 
 ## Processed file naming
 
@@ -236,3 +257,39 @@ If any step fails — even after all retries are exhausted — the file stays in
 ## Spreadsheet name verification
 
 Before processing any files the application fetches the spreadsheet title and compares it to `GoogleSheets:ExpectedSpreadsheetName`. If the names do not match, or if the API call fails after 3 retries, the application logs the error and exits without processing any files. This prevents writing data to the wrong spreadsheet when `SpreadsheetId` is misconfigured.
+
+---
+
+# Building and releasing
+
+## Build locally
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+
+```powershell
+dotnet publish PDF2XLS/PDF2XLS.csproj `
+  -c Release `
+  -r win-x64 `
+  --self-contained true `
+  -p:PublishSingleFile=true `
+  -p:PublishReadyToRun=true `
+  -p:EnableCompressionInSingleFile=true `
+  -o publish
+```
+
+The output directory contains `PDF2XLS.exe` and `appsettings.json`.
+
+## GitHub release pipeline
+
+Pushing a version tag triggers the [Release workflow](.github/workflows/release.yml), which:
+
+1. Builds a self-contained, single-file `win-x64` executable on `windows-latest`
+2. Packages `PDF2XLS.exe` and `appsettings.json` into `PDF2XLS-<tag>-win-x64.zip`
+3. Creates a GitHub release with auto-generated release notes and attaches the zip
+
+To publish a release:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
