@@ -17,6 +17,8 @@ class Program
     private static Dictionary<string, string> Mappings { get; set; } = new();
     private static string SeqAddress { get; set; } = string.Empty;
     private static string SeqAppName { get; set; } = string.Empty;
+    private static string SeqApiKey { get; set; } = string.Empty;
+    private static string ExeDirectory { get; set; } = string.Empty;
     private static bool UploadPDFStatus { get; set; }
     private static string PDF2URLPath { get; set; } = string.Empty;
     private static Guid RunID { get; set; }
@@ -27,10 +29,10 @@ class Program
         try
         {
             string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
-            string realExeDirectory = Path.GetDirectoryName(exePath)!;
+            ExeDirectory = Path.GetDirectoryName(exePath)!;
 
             IConfiguration config = new ConfigurationBuilder()
-                .SetBasePath(realExeDirectory)
+                .SetBasePath(ExeDirectory)
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                 .Build();
 
@@ -44,6 +46,7 @@ class Program
             PreferredApi    = config["PreferredAPI"] ?? string.Empty;
             SeqAddress      = config["Seq:ServerAddress"] ?? string.Empty;
             SeqAppName      = config["Seq:AppName"] ?? string.Empty;
+            SeqApiKey       = config["Seq:ApiKey"] ?? string.Empty;
             UploadPDFStatus = bool.Parse(config["UploadPDF:Enabled"] ?? "false");
             PDF2URLPath     = config["UploadPDF:PDF2URLPath"] ?? string.Empty;
             Mappings        = config.GetSection("GoogleSheets:Mappings")
@@ -51,23 +54,13 @@ class Program
             RunID   = Guid.NewGuid();
             RunTime = DateTime.UtcNow.ToString("yyyyMMdd HHmmss");
 
-            Log.Logger = new LoggerConfiguration()
-                .Enrich.WithProperty("Application", SeqAppName)
-                .MinimumLevel.Debug()
-                .WriteTo.File(
-                    path: $"{realExeDirectory}/logs/log-.txt",
-                    rollingInterval: RollingInterval.Day,
-                    retainedFileCountLimit: 365,
-                    outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
-                )
-                .WriteTo.Seq(SeqAddress)
-                .CreateLogger();
+            ConfigureLogger();
 
             Log.Information("Starting PDF2XLS application, Run ID: {RunID}", RunID);
 
             if (args.Length < 1)
             {
-                Console.WriteLine("Usage: PDF2XLS <file or folder path>");
+                Console.WriteLine("Usage: PDF2XLS <file.pdf> [file2.pdf ...] | <folder path>");
                 Console.WriteLine("Press any key to exit...");
                 Console.ReadKey();
                 return;
@@ -97,44 +90,43 @@ class Program
                 return;
             }
 
-            // ── Input: accept file or folder ────────────────────────────────
-            string input = args[0];
-            List<string> filesToProcess;
-
-            if (Directory.Exists(input))
+            // ── Input: accept file(s) or folder ─────────────────────────────
+            InputPathResult inputResult = InputPathResolver.Resolve(args);
+            if (!inputResult.IsSuccess)
             {
-                filesToProcess = Directory.GetFiles(input, "*.pdf", SearchOption.TopDirectoryOnly)
-                                          .OrderBy(f => f)
-                                          .ToList();
-                if (filesToProcess.Count == 0)
-                {
-                    Console.WriteLine($"No PDF files found in folder: {input}");
-                    Log.Warning("No PDF files found in folder: {Folder}", input);
-                    return;
-                }
-                Log.Information("Processing {Count} PDF files from folder: {Folder}", filesToProcess.Count, input);
-            }
-            else if (File.Exists(input))
-            {
-                if (!string.Equals(Path.GetExtension(input), ".pdf", StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"File {input} is not a PDF file");
-                    Log.Error("File {InputFilePath} is not a PDF file", input);
-                    return;
-                }
-                filesToProcess = [input];
-            }
-            else
-            {
-                Console.WriteLine($"Path does not exist: {input}");
-                Log.Error("Path does not exist: {Input}", input);
+                Console.WriteLine(inputResult.ErrorMessage);
+                if (inputResult.FailureKind == InputPathFailureKind.EmptyDirectory)
+                    Log.Warning("{Error}", inputResult.ErrorMessage);
+                else
+                    Log.Error("Invalid input path: {Error}", inputResult.ErrorMessage);
                 return;
             }
 
-            foreach (string inputFilePath in filesToProcess)
+            if (inputResult.IsDirectory)
+            {
+                Log.Information(
+                    "Processing {Count} PDF files from folder: {Folder}",
+                    inputResult.Files.Count,
+                    inputResult.InputPath);
+            }
+            else if (inputResult.IsMultipleInputs)
+            {
+                Log.Information(
+                    "Processing {Count} PDF files from command line",
+                    inputResult.Files.Count);
+            }
+
+            foreach (string inputFilePath in inputResult.Files)
             {
                 RunID = Guid.NewGuid();
-                await ProcessFileAsync(inputFilePath, config);
+                try
+                {
+                    await ProcessFileAsync(inputFilePath, config);
+                }
+                finally
+                {
+                    await FlushLogsAsync();
+                }
             }
         }
         catch (Exception ex)
@@ -148,6 +140,34 @@ class Program
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static void ConfigureLogger()
+    {
+        Directory.CreateDirectory(Path.Combine(ExeDirectory, "logs"));
+
+        LoggerConfiguration loggerConfig = new LoggerConfiguration()
+            .Enrich.WithProperty("Application", SeqAppName)
+            .MinimumLevel.Debug()
+            .WriteTo.File(
+                path: Path.Combine(ExeDirectory, "logs", "log-.txt"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 365,
+                outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+            );
+
+        if (!string.IsNullOrWhiteSpace(SeqAddress))
+        {
+            loggerConfig = loggerConfig.WriteTo.Seq(SeqAddress, apiKey: SeqApiKey);
+        }
+
+        Log.Logger = loggerConfig.CreateLogger();
+    }
+
+    private static async Task FlushLogsAsync()
+    {
+        await Log.CloseAndFlushAsync();
+        ConfigureLogger();
+    }
 
     private static async Task ProcessFileAsync(string inputFilePath, IConfiguration config)
     {

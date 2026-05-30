@@ -31,6 +31,10 @@ public static class ConfigurationValidator
         if (uploadEnabled && string.IsNullOrWhiteSpace(config["UploadPDF:PDF2URLPath"]))
             errors.Add("UploadPDF:PDF2URLPath is required when UploadPDF:Enabled is true");
 
+        if (!string.IsNullOrWhiteSpace(config["Seq:ServerAddress"]) &&
+            string.IsNullOrWhiteSpace(config["Seq:ApiKey"]))
+            errors.Add("Seq:ApiKey is required when Seq:ServerAddress is configured");
+
         // Workflow-specific required fields.
         switch (preferredApi)
         {

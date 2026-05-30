@@ -90,9 +90,10 @@ Set `UploadPDF:Enabled` to `"false"` to skip uploading.
 
 1. Run a [Seq](https://datalust.co/seq) server (locally or remote).
 2. Put its URL into `Seq:ServerAddress` (e.g. `http://localhost:5341/`).
-3. `Seq:AppName` is the value of the `App` property used to filter events in Seq.
+3. Create an API key in Seq and set it in `Seq:ApiKey`.
+4. `Seq:AppName` is the value of the `Application` property used to filter events in Seq.
 
-If you don't have a Seq server, leave the address empty — the file logs under `logs/` still work.
+If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file logs under `logs/` still work.
 
 ---
 
@@ -114,13 +115,13 @@ If you don't have a Seq server, leave the address empty — the file logs under 
 | `AzureDocumentIntelligence` | `Endpoint`, `ApiKey` | AzureDocumentIntelligence | Azure Document Intelligence endpoint and key. |
 | `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `ExpectedSpreadsheetName`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `ExpectedSpreadsheetName` is verified against the live spreadsheet title at startup; leave blank to skip the check. `Mappings` values are spreadsheet **column letters**. |
 | `UploadPDF` | `Enabled`, `PDF2URLPath` | Optional | Enable to upload the PDF and store the link in `DocumentLink`. |
-| `Seq` | `ServerAddress`, `AppName` | Optional | Centralised Seq logging. |
+| `Seq` | `ServerAddress`, `ApiKey`, `AppName` | Optional | Centralised Seq logging. `ApiKey` is required when `ServerAddress` is set. |
 
 ---
 
 # Usage
 
-This is a CLI application. Pass the path to a PDF invoice **or a folder** as the first argument, or drag-and-drop the PDF (or folder) onto the executable.
+This is a CLI application. Pass one or more PDF file paths, or a folder path, as arguments. You can also drag-and-drop a PDF (or folder) onto the executable.
 
 ## Processing a single file
 
@@ -130,9 +131,20 @@ PDF2XLS.exe "C:\invoices\invoice-001.pdf"
 
 The selected workflow processes the file, parses the response into the internal schema, and appends a row to the configured Google Sheet.
 
+## Processing multiple files
+
+Pass two or more PDF paths on the command line:
+
+```
+PDF2XLS.exe "C:\invoices\invoice-001.pdf" "C:\invoices\invoice-002.pdf"
+```
+
+- Files are processed **in the order given** on the command line.
+- Duplicate paths are skipped automatically.
+
 ## Processing a folder
 
-Pass a folder path to process all PDF files inside it:
+Pass a single folder path to process all PDF files inside it:
 
 ```
 PDF2XLS.exe "C:\invoices\2026-05\"
@@ -148,7 +160,7 @@ PDF2XLS.exe "C:\invoices\2026-05\"
 
 # Logging
 
-On startup the program creates a `logs/` subfolder next to the executable and writes a daily rolling log file (365 days retained). If `Seq:ServerAddress` is set, it also forwards events to Seq.
+On startup the program creates a `logs/` subfolder next to the executable and writes a daily rolling log file (365 days retained). If `Seq:ServerAddress` is set, it also forwards events to Seq using the configured API key. After each PDF file finishes processing (success or failure), buffered log events are flushed to both the local file and Seq before the next file starts.
 
 ## Processed file naming
 
