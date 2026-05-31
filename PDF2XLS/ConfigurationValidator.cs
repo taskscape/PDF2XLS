@@ -19,8 +19,11 @@ public static class ConfigurationValidator
         }
 
         // Common fields required by every workflow.
-        if (string.IsNullOrWhiteSpace(config["GoogleSheets:ServiceAccountFile"]))
+        string? serviceAccountFile = config["GoogleSheets:ServiceAccountFile"];
+        if (string.IsNullOrWhiteSpace(serviceAccountFile))
             errors.Add("GoogleSheets:ServiceAccountFile is required");
+        else if (!File.Exists(serviceAccountFile))
+            errors.Add($"GoogleSheets:ServiceAccountFile points to a file that does not exist: {serviceAccountFile}");
         if (string.IsNullOrWhiteSpace(config["GoogleSheets:SpreadsheetId"]))
             errors.Add("GoogleSheets:SpreadsheetId is required");
         if (string.IsNullOrWhiteSpace(config["GoogleSheets:SheetName"]))
