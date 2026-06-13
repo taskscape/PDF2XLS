@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json.Nodes;
+using Azure;
 using Google.Apis.Sheets.v4;
 using Microsoft.Extensions.Configuration;
 using PDF2XLS.Helpers;
@@ -90,6 +91,24 @@ class Program
                 return;
             }
 
+            if (!await sheetsValidator.VerifySheetName(sheetsService))
+            {
+                Console.WriteLine("Google Sheets tab mismatch — application cannot proceed. Check 'GoogleSheets:SheetName' in appsettings.json.");
+                Log.Error("Application aborted due to Google Sheets tab mismatch.");
+                return;
+            }
+
+            AzureDocumentIntelligenceQuotaTracker? azureQuotaTracker = null;
+            if (PreferredApi == "AzureDocumentIntelligence")
+            {
+                azureQuotaTracker = new AzureDocumentIntelligenceQuotaTracker(config, ExeDirectory);
+                if (azureQuotaTracker.IsQuotaLimitReached())
+                {
+                    azureQuotaTracker.LogQuotaLimitReached();
+                    return;
+                }
+            }
+
             // ── Input: accept file(s) or folder ─────────────────────────────
             InputPathResult inputResult = InputPathResolver.Resolve(args);
             if (!inputResult.IsSuccess)
@@ -118,10 +137,18 @@ class Program
 
             foreach (string inputFilePath in inputResult.Files)
             {
+                if (azureQuotaTracker?.IsQuotaLimitReached() == true)
+                {
+                    azureQuotaTracker.LogQuotaLimitReached();
+                    break;
+                }
+
                 RunID = Guid.NewGuid();
                 try
                 {
-                    await ProcessFileAsync(inputFilePath, config);
+                    bool shouldContinue = await ProcessFileAsync(inputFilePath, config, azureQuotaTracker);
+                    if (!shouldContinue)
+                        break;
                 }
                 finally
                 {
@@ -169,7 +196,10 @@ class Program
         ConfigureLogger();
     }
 
-    private static async Task ProcessFileAsync(string inputFilePath, IConfiguration config)
+    private static async Task<bool> ProcessFileAsync(
+        string inputFilePath,
+        IConfiguration config,
+        AzureDocumentIntelligenceQuotaTracker? azureQuotaTracker)
     {
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         long fileSizeKb = new FileInfo(inputFilePath).Length / 1024;
@@ -275,10 +305,10 @@ class Program
                 // ── Azure Document Intelligence ───────────────────────────────
                 case "AzureDocumentIntelligence":
                 {
-                    AzureDocumentIntelligenceProcessor azDIProcessor = new(config);
+                    AzureDocumentIntelligenceProcessor azDIProcessor = new(config, azureQuotaTracker);
 
                     AsyncRetryPolicy azDIRetry = Policy
-                        .Handle<Exception>(ex => ex is not OperationCanceledException)
+                        .Handle<Exception>(ShouldRetryAzureDocumentIntelligenceException)
                         .WaitAndRetryAsync(
                             retryCount: 3,
                             sleepDurationProvider: attempt =>
@@ -302,15 +332,15 @@ class Program
                             throw new InvalidOperationException(
                                 "Azure Document Intelligence returned no result");
                         }
-
-                        if (UploadPDFStatus)
-                        {
-                            documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
-                            if (!StringHelper.IsValidHttpUrl(documentLink))
-                                throw new Exception("Document failed to upload");
-                            Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
-                        }
                     });
+
+                    if (UploadPDFStatus)
+                    {
+                        documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
+                        if (!StringHelper.IsValidHttpUrl(documentLink))
+                            throw new Exception("Document failed to upload");
+                        Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
+                    }
 
                     break;
                 }
@@ -350,6 +380,25 @@ class Program
             Log.Information(
                 "Processing complete. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {File}",
                 RunID, stopwatch.Elapsed.TotalSeconds, Path.GetFileName(inputFilePath));
+
+            return true;
+        }
+        catch (AzureDocumentIntelligenceQuotaReachedException e)
+        {
+            stopwatch.Stop();
+            Log.Information(e,
+                "Processing stopped. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
+                RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
+            return false;
+        }
+        catch (AzureDocumentIntelligenceQuotaAccountingException e)
+        {
+            stopwatch.Stop();
+            Console.WriteLine("There was an error while updating the Azure Document Intelligence quota counter. Processing stopped.");
+            Log.Error(e,
+                "Processing stopped because the Azure Document Intelligence quota counter could not be updated. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
+                RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
+            return false;
         }
         catch (Exception e)
         {
@@ -358,7 +407,22 @@ class Program
             Log.Error(e,
                 "Processing FAILED. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
                 RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
+            return true;
         }
+    }
+
+    private static bool ShouldRetryAzureDocumentIntelligenceException(Exception ex)
+    {
+        if (ex is AzureDocumentIntelligenceQuotaException)
+            return false;
+
+        if (ex is OperationCanceledException)
+            return false;
+
+        if (ex is RequestFailedException { Status: >= 400 and < 500 })
+            return false;
+
+        return true;
     }
 
     private static async Task<string> RunPDF2URL(string exePath, string filePath)

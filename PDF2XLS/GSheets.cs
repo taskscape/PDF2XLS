@@ -61,10 +61,13 @@ public class GSheets
     private async Task<int?> GetSheetIdAsync(SheetsService sheetsService, CancellationToken cancellationToken)
     {
         Spreadsheet? spreadsheet = await sheetsService.Spreadsheets.Get(_spreadsheetId).ExecuteAsync(cancellationToken);
-        Sheet? sheet = spreadsheet.Sheets.FirstOrDefault(s =>
-            s.Properties.Title.Equals(_sheetName, StringComparison.OrdinalIgnoreCase));
+        Sheet? sheet = FindConfiguredSheet(spreadsheet);
         return sheet?.Properties.SheetId;
     }
+
+    private Sheet? FindConfiguredSheet(Spreadsheet spreadsheet) =>
+        spreadsheet.Sheets.FirstOrDefault(s =>
+            string.Equals(s.Properties.Title, _sheetName, StringComparison.Ordinal));
 
     public async Task<bool> VerifySpreadsheetName(SheetsService sheetsService)
     {
@@ -95,6 +98,52 @@ public class GSheets
         catch (Exception ex)
         {
             Log.Error(ex, "Failed to verify spreadsheet name after retries. SpreadsheetId: {Id}", _spreadsheetId);
+            return false;
+        }
+    }
+
+    public async Task<bool> VerifySheetName(SheetsService sheetsService)
+    {
+        try
+        {
+            using CancellationTokenSource cts = new(TimeSpan.FromMinutes(5));
+
+            Spreadsheet? spreadsheet = await SheetsRetryPolicy.ExecuteAsync(
+                ct => sheetsService.Spreadsheets.Get(_spreadsheetId).ExecuteAsync(ct),
+                cts.Token);
+
+            Sheet? exactSheet = FindConfiguredSheet(spreadsheet);
+            if (exactSheet != null)
+            {
+                Log.Information("Spreadsheet sheet verified: '{SheetName}'", _sheetName);
+                return true;
+            }
+
+            Sheet? caseInsensitiveMatch = spreadsheet.Sheets.FirstOrDefault(s =>
+                string.Equals(s.Properties.Title, _sheetName, StringComparison.OrdinalIgnoreCase));
+
+            if (caseInsensitiveMatch != null)
+            {
+                Log.Error(
+                    "Spreadsheet sheet name mismatch. Expected exact tab name: '{Expected}', found different casing: '{Actual}'. SpreadsheetId: {Id}",
+                    _sheetName,
+                    caseInsensitiveMatch.Properties.Title,
+                    _spreadsheetId);
+                return false;
+            }
+
+            string availableSheets = string.Join(", ", spreadsheet.Sheets.Select(s => $"'{s.Properties.Title}'"));
+            Log.Error(
+                "Spreadsheet sheet not found. Expected exact tab name: '{Expected}'. Available tabs: {Available}. SpreadsheetId: {Id}",
+                _sheetName,
+                availableSheets,
+                _spreadsheetId);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to verify spreadsheet sheet after retries. SpreadsheetId: {Id}, SheetName: {SheetName}",
+                _spreadsheetId, _sheetName);
             return false;
         }
     }

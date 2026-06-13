@@ -16,11 +16,15 @@ public class AzureDocumentIntelligenceProcessor
 {
     private readonly string _endpoint;
     private readonly string _apiKey;
+    private readonly AzureDocumentIntelligenceQuotaTracker? _quotaTracker;
 
-    public AzureDocumentIntelligenceProcessor(IConfiguration config)
+    public AzureDocumentIntelligenceProcessor(
+        IConfiguration config,
+        AzureDocumentIntelligenceQuotaTracker? quotaTracker = null)
     {
         _endpoint = config["AzureDocumentIntelligence:Endpoint"] ?? string.Empty;
         _apiKey = config["AzureDocumentIntelligence:ApiKey"] ?? string.Empty;
+        _quotaTracker = quotaTracker;
     }
 
     /// <summary>
@@ -31,9 +35,23 @@ public class AzureDocumentIntelligenceProcessor
     {
         try
         {
+            int? documentPageCount = null;
+            if (_quotaTracker?.IsEnabled == true)
+            {
+                documentPageCount = PdfPageCounter.CountPages(filePath);
+                _quotaTracker.EnsureCanSubmit(filePath, documentPageCount.Value);
+            }
+
             DocumentIntelligenceClient client = new(
                 new Uri(_endpoint),
-                new AzureKeyCredential(_apiKey));
+                new AzureKeyCredential(_apiKey),
+                new DocumentIntelligenceClientOptions
+                {
+                    Retry =
+                    {
+                        MaxRetries = 0
+                    }
+                });
 
             BinaryData pdfData = BinaryData.FromBytes(await File.ReadAllBytesAsync(filePath));
 
@@ -43,6 +61,11 @@ public class AzureDocumentIntelligenceProcessor
                 WaitUntil.Started,
                 "prebuilt-invoice",
                 pdfData);
+
+            if (documentPageCount.HasValue)
+            {
+                _quotaTracker?.RecordSuccessfulSubmission(filePath, documentPageCount.Value);
+            }
 
             using CancellationTokenSource pollCts = new(TimeSpan.FromMinutes(5));
             await operation.WaitForCompletionAsync(pollCts.Token);

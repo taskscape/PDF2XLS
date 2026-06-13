@@ -62,6 +62,12 @@ public static class ConfigurationValidator
                     errors.Add("AzureDocumentIntelligence:Endpoint is required for the AzureDocumentIntelligence workflow");
                 if (string.IsNullOrWhiteSpace(config["AzureDocumentIntelligence:ApiKey"]))
                     errors.Add("AzureDocumentIntelligence:ApiKey is required for the AzureDocumentIntelligence workflow");
+                string? monthlyPageLimit = config["AzureDocumentIntelligence:MonthlyPageLimit"];
+                if (!string.IsNullOrWhiteSpace(monthlyPageLimit) &&
+                    (!int.TryParse(monthlyPageLimit, out int parsedLimit) || parsedLimit < 0))
+                {
+                    errors.Add("AzureDocumentIntelligence:MonthlyPageLimit must be a non-negative integer. Use 0 or leave empty to disable the internal quota guard.");
+                }
                 break;
 
             default:

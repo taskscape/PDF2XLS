@@ -74,6 +74,7 @@ Then, depending on the workflow:
 4. Copy **Endpoint** (looks like `https://<resource>.cognitiveservices.azure.com/`) into `AzureDocumentIntelligence:Endpoint`.
 5. Copy **KEY 1** into `AzureDocumentIntelligence:ApiKey`.
 6. This workflow uses the **`prebuilt-invoice`** model, which is built into the service — you do not need to train anything. It is available in all regions that support Document Intelligence v4.
+7. Set `AzureDocumentIntelligence:MonthlyPageLimit` to `500` for the F0 free-tier guard. Set it to `0` to disable the internal guard. The app stores the month counter in `AzureDocumentIntelligence:MonthlyQuotaCounterPath`, or next to the executable as `azure-document-intelligence-quota.json` when that value is empty.
 
 > Note: Document Intelligence is deterministic and returns structured fields directly. It does not use OpenAI.
 
@@ -117,7 +118,7 @@ If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file log
 | (root) | `PreferredAPI` | All | `NuDelta`, `OpenAIResponses`, or `AzureDocumentIntelligence`. |
 | `NuDeltaCredentials` | `Username`, `Password` | NuDelta | NuDelta Invoice portal login (HTTP Basic auth). |
 | `OpenAI` | `OpenAI_APIKey`, `OpenAI_Model`, `Prompt` | OpenAIResponses | OpenAI key, model id, and prompt containing `{schema}`. |
-| `AzureDocumentIntelligence` | `Endpoint`, `ApiKey` | AzureDocumentIntelligence | Azure Document Intelligence endpoint and key. |
+| `AzureDocumentIntelligence` | `Endpoint`, `ApiKey`, `MonthlyPageLimit`, `MonthlyQuotaCounterPath` | AzureDocumentIntelligence | Azure Document Intelligence endpoint/key and optional internal monthly page guard. `MonthlyPageLimit` is a non-negative integer; `0` disables the guard. `MonthlyQuotaCounterPath` may be blank to use `{app}/azure-document-intelligence-quota.json`. |
 | `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `ExpectedSpreadsheetName`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `ExpectedSpreadsheetName` is verified against the live spreadsheet title at startup; leave blank to skip the check. `Mappings` values are spreadsheet **column letters**. |
 | `UploadPDF` | `Enabled`, `PDF2URLPath` | Optional | Enable to upload the PDF and store the link in `DocumentLink`. |
 | `Seq` | `ServerAddress`, `ApiKey`, `AppName` | Optional | Centralised Seq logging. `ApiKey` is required when `ServerAddress` is set. |
@@ -214,7 +215,7 @@ The file is left untouched if processing fails or the Google Sheets write does n
 
 - **NuDelta** — polls for the result with exponential backoff (up to 5 attempts, 1-second base delay). The outer operation also retries on exception with a 1-second delay (up to 5 attempts).
 - **OpenAIResponses** — the inner HTTP client retries on HTTP 429 / 5xx with exponential backoff (3 attempts). The outer operation also retries on exception with exponential backoff (3 attempts).
-- **AzureDocumentIntelligence** — retries on exception with exponential backoff (3 attempts, 2 s → 4 s → 8 s). The Azure SDK additionally handles low-level transient HTTP errors.
+- **AzureDocumentIntelligence** — checks the configured internal monthly page guard before every Azure submission attempt, then retries transient extraction failures with exponential backoff (3 retries, 2 s → 4 s → 8 s). `OperationCanceledException`, quota guard stops, and Azure `RequestFailedException` 4xx responses are not retried by the outer policy. Azure SDK retries are disabled for this client so every retryable submission attempt passes through the quota guard. PDF upload happens after the Azure retry block, so an upload failure does not resubmit the document to Azure in the same run.
 
 ---
 
@@ -231,11 +232,13 @@ A file is only renamed/deleted **after all of the following have succeeded**:
 
 If any step fails — even after all retries are exhausted — the file stays in place.
 
+For the AzureDocumentIntelligence workflow, the internal monthly quota counter is updated immediately after Azure accepts a document submission, before polling, PDF upload, or Google Sheets writes. This prevents post-submission failures from causing uncounted repeat submissions.
+
 ## Timeouts
 
 | Layer | Timeout | Behaviour on expiry |
 |---|---|---|
-| **Azure DI polling** | 5 minutes | `OperationCanceledException` thrown; retried by outer policy (up to 3×) |
+| **Azure DI polling** | 5 minutes | `OperationCanceledException` thrown; not retried by the outer policy |
 | **NuDelta HTTP client** (upload + poll requests) | 5 minutes per request | `TaskCanceledException` thrown; propagates to outer retry policy |
 | **OpenAI HTTP client** | 5 minutes per request | `TaskCanceledException` thrown; propagates to outer retry policy |
 | **Google Sheets API calls** (all three calls per write) | 5 minutes per call | `OperationCanceledException` thrown; propagates as a write failure — file stays |
@@ -249,10 +252,14 @@ If any step fails — even after all retries are exhausted — the file stays in
 | **NuDelta inner** (result polling) | up to 5 | Exponential (`2^n` s) | Document state is not `done` |
 | **OpenAI outer** (whole operation) | up to 3 | Exponential (`2^n` s) | Any exception except `OperationCanceledException` |
 | **OpenAI inner** (HTTP call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx or HTTP 429 |
-| **Azure DI** (whole operation) | up to 3 | Exponential (`2^n` s) | Any exception except `OperationCanceledException` |
+| **Azure DI** (extraction only) | up to 3 retries | Exponential (`2^n` s) | Transient exceptions except `OperationCanceledException`, Azure quota guard stops, and Azure `RequestFailedException` 4xx responses |
 | **Google Sheets** (each API call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx, HTTP 429, `HttpRequestException`, `IOException` |
 
 `OperationCanceledException` is never retried in any policy — it signals an intentional 5-minute timeout and should propagate immediately so the file is left untouched for the next run.
+
+## Azure monthly quota guard
+
+When `AzureDocumentIntelligence:MonthlyPageLimit` is greater than `0`, the app keeps a UTC-month counter in JSON. Before each Azure submission attempt, including retry attempts, it counts the local PDF pages and stops the batch without calling Azure if the monthly limit has already been reached or the next document would exceed it. The source PDF is left untouched and the log records that the internally configured monthly page quota has been achieved or would be exceeded.
 
 ## Spreadsheet name verification
 
