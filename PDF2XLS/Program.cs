@@ -223,7 +223,7 @@ class Program
                     NuDeltaProcessor nuDeltaProcessor = new(config);
 
                     AsyncRetryPolicy retryPolicy = Policy
-                        .Handle<Exception>(ex => ex is not OperationCanceledException)
+                        .Handle<Exception>(ShouldRetryWorkflowException)
                         .WaitAndRetryAsync(
                             retryCount: 5,
                             sleepDurationProvider: _ => TimeSpan.FromSeconds(1),
@@ -240,12 +240,7 @@ class Program
                     {
                         string? r = await nuDeltaProcessor.ProcessPdfAsync(inputFilePath);
                         root = r != null ? JsonNode.Parse(r) : null;
-                        if (root?["data"]?["issue"] == null ||
-                            string.IsNullOrEmpty(root["data"]!["issue"]?.ToString()))
-                        {
-                            throw new InvalidOperationException(
-                                "JSON response is missing issue data");
-                        }
+                        EnsureInvoiceIssueData(root, "NuDelta");
 
                         if (UploadPDFStatus)
                         {
@@ -265,7 +260,7 @@ class Program
                     OpenAIResponsesProcessor openAIProcessor = new(config, ResponseSchema);
 
                     AsyncRetryPolicy openAIRetry = Policy
-                        .Handle<Exception>(ex => ex is not OperationCanceledException)
+                        .Handle<Exception>(ShouldRetryWorkflowException)
                         .WaitAndRetryAsync(
                             retryCount: 3,
                             sleepDurationProvider: attempt =>
@@ -283,12 +278,7 @@ class Program
                     {
                         string? r = await openAIProcessor.ProcessPdfAsync(inputFilePath);
                         root = r != null ? JsonNode.Parse(r) : null;
-                        if (root?["data"]?["issue"] == null ||
-                            string.IsNullOrEmpty(root["data"]!["issue"]?.ToString()))
-                        {
-                            throw new InvalidOperationException(
-                                "JSON response is missing issue data");
-                        }
+                        EnsureInvoiceIssueData(root, "OpenAI Responses");
 
                         if (UploadPDFStatus)
                         {
@@ -332,6 +322,8 @@ class Program
                             throw new InvalidOperationException(
                                 "Azure Document Intelligence returned no result");
                         }
+
+                        EnsureInvoiceIssueData(root, "Azure Document Intelligence");
                     });
 
                     if (UploadPDFStatus)
@@ -400,6 +392,18 @@ class Program
                 RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
             return false;
         }
+        catch (SkippedDocumentException e)
+        {
+            stopwatch.Stop();
+            string? skippedPath = TryMarkFileAsSkipped(inputFilePath);
+            Console.WriteLine(skippedPath == null
+                ? "The file could not be processed as an invoice, but could not be marked as skipped."
+                : "The file could not be processed as an invoice and was marked as skipped.");
+            Log.Warning(e,
+                "Processing skipped. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file} | SkippedFile: {SkippedFile}",
+                RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath, skippedPath);
+            return true;
+        }
         catch (Exception e)
         {
             stopwatch.Stop();
@@ -413,6 +417,9 @@ class Program
 
     private static bool ShouldRetryAzureDocumentIntelligenceException(Exception ex)
     {
+        if (ex is SkippedDocumentException)
+            return false;
+
         if (ex is AzureDocumentIntelligenceQuotaException)
             return false;
 
@@ -423,6 +430,56 @@ class Program
             return false;
 
         return true;
+    }
+
+    private static bool ShouldRetryWorkflowException(Exception ex) =>
+        ex is not OperationCanceledException and not SkippedDocumentException;
+
+    private static void EnsureInvoiceIssueData(JsonNode? root, string source)
+    {
+        if (root == null)
+            throw new InvalidOperationException($"{source} returned no parseable result");
+
+        string issue = root["data"]?["issue"]?.ToString() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(issue))
+        {
+            throw new SkippedDocumentException(
+                $"{source} response is missing issue data; document does not look like an invoice.");
+        }
+    }
+
+    private static string? TryMarkFileAsSkipped(string inputFilePath)
+    {
+        try
+        {
+            string skippedPath = GetAvailableSiblingPath($"{inputFilePath}.skp");
+            File.Move(inputFilePath, skippedPath);
+            return skippedPath;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to mark file as skipped. File: {file}", inputFilePath);
+            return null;
+        }
+    }
+
+    private static string GetAvailableSiblingPath(string preferredPath)
+    {
+        if (!File.Exists(preferredPath))
+            return preferredPath;
+
+        string directory = Path.GetDirectoryName(preferredPath) ?? string.Empty;
+        string fileNameWithoutExtension = Path.GetFileNameWithoutExtension(preferredPath);
+        string extension = Path.GetExtension(preferredPath);
+
+        for (int i = 1; i <= 999; i++)
+        {
+            string candidate = Path.Combine(directory, $"{fileNameWithoutExtension} ({i}){extension}");
+            if (!File.Exists(candidate))
+                return candidate;
+        }
+
+        return Path.Combine(directory, $"{fileNameWithoutExtension} {Guid.NewGuid():N}{extension}");
     }
 
     private static async Task<string> RunPDF2URL(string exePath, string filePath)

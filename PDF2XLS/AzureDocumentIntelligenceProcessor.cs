@@ -38,7 +38,17 @@ public class AzureDocumentIntelligenceProcessor
             int? documentPageCount = null;
             if (_quotaTracker?.IsEnabled == true)
             {
-                documentPageCount = PdfPageCounter.CountPages(filePath);
+                try
+                {
+                    documentPageCount = PdfPageCounter.CountPages(filePath);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    throw new SkippedDocumentException(
+                        "PDF page count could not be determined safely; file cannot be submitted to Azure Document Intelligence.",
+                        ex);
+                }
+
                 _quotaTracker.EnsureCanSubmit(filePath, documentPageCount.Value);
             }
 
@@ -74,8 +84,8 @@ public class AzureDocumentIntelligenceProcessor
 
             if (result.Documents is not { Count: > 0 })
             {
-                Log.Error("Azure Document Intelligence returned no documents. File: {file}", filePath);
-                return null;
+                throw new SkippedDocumentException(
+                    "Azure Document Intelligence returned no invoice documents.");
             }
 
             AnalyzedDocument invoice = result.Documents[0];
@@ -85,12 +95,27 @@ public class AzureDocumentIntelligenceProcessor
 
             return BuildJsonSchema(invoice);
         }
+        catch (RequestFailedException ex) when (IsPermanentDocumentFailure(ex))
+        {
+            Log.Warning(ex, "Azure Document Intelligence rejected an unprocessable document. File: {file}", filePath);
+            throw new SkippedDocumentException(
+                "Azure Document Intelligence rejected the document as unsupported or invalid.",
+                ex);
+        }
+        catch (SkippedDocumentException ex)
+        {
+            Log.Warning(ex, "Azure Document Intelligence skipped document. File: {file}", filePath);
+            throw;
+        }
         catch (Exception ex)
         {
             Log.Error(ex, "Azure Document Intelligence processing error. File: {file}", filePath);
             throw;
         }
     }
+
+    private static bool IsPermanentDocumentFailure(RequestFailedException ex) =>
+        ex.Status is 400 or 413 or 415;
 
     private static string BuildJsonSchema(AnalyzedDocument invoice)
     {

@@ -211,6 +211,14 @@ All three parts are separated by a **single space**. There are no underscores in
 
 The file is left untouched if processing fails or the Google Sheets write does not succeed.
 
+If the document itself is permanently unprocessable — for example Azure Document Intelligence rejects it as unsupported/invalid, no invoice document is found, or the extracted result is missing required invoice issue data — the original PDF is renamed in place by appending `.skp`:
+
+```
+invoice-001.pdf.skp
+```
+
+`.skp` files are not picked up by folder processing because only files whose extension is exactly `.pdf` are scanned.
+
 # Notes per workflow
 
 - **NuDelta** — polls for the result with exponential backoff (up to 5 attempts, 1-second base delay). The outer operation also retries on exception with a 1-second delay (up to 5 attempts).
@@ -230,7 +238,7 @@ A file is only renamed/deleted **after all of the following have succeeded**:
 2. PDF upload to public URL *(if `UploadPDF:Enabled` is `"true"`)*
 3. Google Sheets row write
 
-If any step fails — even after all retries are exhausted — the file stays in place.
+If any transient or downstream step fails — even after all retries are exhausted — the file stays in place. Permanently unprocessable documents are renamed to `.skp` so they are not submitted repeatedly.
 
 For the AzureDocumentIntelligence workflow, the internal monthly quota counter is updated immediately after Azure accepts a document submission, before polling, PDF upload, or Google Sheets writes. This prevents post-submission failures from causing uncounted repeat submissions.
 
@@ -248,11 +256,11 @@ For the AzureDocumentIntelligence workflow, the internal monthly quota counter i
 
 | Workflow / stage | Retries | Delay strategy | What triggers a retry |
 |---|---|---|---|
-| **NuDelta outer** (whole operation) | up to 5 | 1 s fixed | Any exception except `OperationCanceledException` |
+| **NuDelta outer** (whole operation) | up to 5 | 1 s fixed | Any exception except `OperationCanceledException` and permanent skip outcomes |
 | **NuDelta inner** (result polling) | up to 5 | Exponential (`2^n` s) | Document state is not `done` |
-| **OpenAI outer** (whole operation) | up to 3 | Exponential (`2^n` s) | Any exception except `OperationCanceledException` |
+| **OpenAI outer** (whole operation) | up to 3 | Exponential (`2^n` s) | Any exception except `OperationCanceledException` and permanent skip outcomes |
 | **OpenAI inner** (HTTP call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx or HTTP 429 |
-| **Azure DI** (extraction only) | up to 3 retries | Exponential (`2^n` s) | Transient exceptions except `OperationCanceledException`, Azure quota guard stops, and Azure `RequestFailedException` 4xx responses |
+| **Azure DI** (extraction only) | up to 3 retries | Exponential (`2^n` s) | Transient exceptions except `OperationCanceledException`, permanent skip outcomes, Azure quota guard stops, and Azure `RequestFailedException` 4xx responses |
 | **Google Sheets** (each API call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx, HTTP 429, `HttpRequestException`, `IOException` |
 
 `OperationCanceledException` is never retried in any policy — it signals an intentional 5-minute timeout and should propagate immediately so the file is left untouched for the next run.
