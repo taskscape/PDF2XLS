@@ -91,10 +91,12 @@ Set `UploadPDF:Enabled` to `"false"` to skip uploading.
 
 1. Run a [Seq](https://datalust.co/seq) server (locally or remote).
 2. Put its URL into `Seq:ServerAddress` (e.g. `http://localhost:5341/`).
-3. Create an API key in Seq and set it in `Seq:ApiKey`.
-4. `Seq:AppName` is the value of the `Application` property used to filter events in Seq.
+3. Create an API key in Seq and set it in `Seq:ApiKey`. **If `Seq:ServerAddress` is set, `Seq:ApiKey` is mandatory** — the application validates this at startup and exits with `Configuration error: Seq:ApiKey is required when Seq:ServerAddress is configured` if the key is missing.
+4. Add `Seq:AppName` and set it to the value of the `Application` property used to filter events in Seq. If it is missing, the `Application` enrichment is sent blank.
 
-If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file logs under `logs/` still work.
+**To disable Seq entirely, leave `Seq:ServerAddress` empty** (the whole `Seq` section can be omitted). In that case neither `Seq:ApiKey` nor `Seq:AppName` is required, and the file logs under `logs/` still work.
+
+> The configuration file shipped in the repository is a development sample and is **not** a ready-to-run default — it contains a populated `Seq:ServerAddress` with an empty `Seq:ApiKey`, which fails the validator. Before running, either provide a valid `Seq:ApiKey` or clear `Seq:ServerAddress`.
 
 ---
 
@@ -106,10 +108,10 @@ If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file log
 2. Unpack the archive into a folder. It contains:
    - `PDF2XLS.exe` — self-contained, single-file executable (64-bit Windows)
    - `appsettings.json` — configuration file (kept alongside the executable so you can edit it without rebuilding)
-3. Open `appsettings.json` and fill in:
+3. The bundled `appsettings.json` is a **sample/template** — no working default values are shipped for the credential and target keys, and some sample values (such as a populated `Seq:ServerAddress` with an empty `Seq:ApiKey`) will fail validation until you correct them. Open `appsettings.json` and fill in:
     - **Always:** `PreferredAPI`, `GoogleSheets.*`.
     - **Workflow-specific** (only for the workflow you chose — see above).
-    - **Optional:** `UploadPDF.*`, `Seq.*`.
+    - **Optional:** `UploadPDF.*`, `Seq.*`. If you enable Seq, provide both `Seq:ServerAddress` **and** `Seq:ApiKey`; otherwise leave `Seq:ServerAddress` empty.
 
 ## Full configuration reference
 
@@ -121,7 +123,7 @@ If you don't have a Seq server, leave `Seq:ServerAddress` empty — the file log
 | `AzureDocumentIntelligence` | `Endpoint`, `ApiKey`, `MonthlyPageLimit`, `MonthlyQuotaCounterPath` | AzureDocumentIntelligence | Azure Document Intelligence endpoint/key and optional internal monthly page guard. `MonthlyPageLimit` is a non-negative integer; `0` disables the guard. `MonthlyQuotaCounterPath` may be blank to use `{app}/azure-document-intelligence-quota.json`. |
 | `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `ExpectedSpreadsheetName`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `ExpectedSpreadsheetName` is verified against the live spreadsheet title at startup; leave blank to skip the check. `Mappings` values are spreadsheet **column letters**. |
 | `UploadPDF` | `Enabled`, `PDF2URLPath` | Optional | Enable to upload the PDF and store the link in `DocumentLink`. |
-| `Seq` | `ServerAddress`, `ApiKey`, `AppName` | Optional | Centralised Seq logging. `ApiKey` is required when `ServerAddress` is set. |
+| `Seq` | `ServerAddress`, `ApiKey`, `AppName` | Optional | Centralised Seq logging. Leave `ServerAddress` empty to disable. When `ServerAddress` is set, `ApiKey` is **required** (enforced at startup). `AppName` becomes the `Application` property used to filter events; add it explicitly, as it is not shipped with a default. |
 
 ---
 
@@ -170,7 +172,9 @@ When more than one file is processed in a single application run (multiple CLI p
 - Each file gets its own unique **RunID** (GUID), but they all share the same **RunTime** timestamp.
 - Each processed file is appended as a separate row in the Google Sheet.
 - Each processed file is renamed to `.bak` after it succeeds.
-- If a file fails, it is **left untouched** and processing continues with the next file.
+- If a file is permanently unprocessable, it is renamed to `.skp` so it is not retried on the next run, and processing continues with the next file.
+- If a file hits a transient/downstream failure (e.g. a timeout or network outage, even after all retries are exhausted), it is left **untouched** and will be retried on the next run; processing continues with the next file.
+- A Google Sheets misconfiguration / permission error aborts the whole run and leaves the file untouched (see below).
 - If a folder contains no PDF files, the app exits with a warning message.
 
 # Logging
@@ -209,36 +213,52 @@ All three parts are separated by a **single space**. There are no underscores in
 
 > **Why spaces?** Spaces make the three logical parts visually distinct without requiring a special delimiter character. The GUID already contains hyphens internally, so using an underscore as a separator would be ambiguous when splitting the name programmatically. Spaces allow a simple `Split(' ', 3)` to recover `RunTime`, `RunID`, and `OriginalFileName` unambiguously.
 
-The file is left untouched if processing fails or the Google Sheets write does not succeed.
+If processing does not complete successfully, the file is **not** renamed to `.bak`. What happens next depends on *why* it failed:
 
-If the document itself is permanently unprocessable — for example Azure Document Intelligence rejects it as unsupported/invalid, no invoice document is found, or the extracted result is missing required invoice issue data — the original PDF is renamed in place by appending `.skp`:
+- **Permanently unprocessable document** — the file is renamed in place by appending `.skp` (see below) so it is not reprocessed on every run.
+- **Transient / downstream failure** (e.g. an intentional 5-minute timeout, a network outage, or Google Sheets temporarily unreachable) — the file is left **untouched** so the next run can try again.
+- **Google Sheets misconfiguration / permission error** — the whole run is aborted and the file is left untouched for manual correction.
+
+If the document itself is permanently unprocessable — for example Azure Document Intelligence rejects it as unsupported/invalid, no invoice document is found, the extracted result is empty or unparseable, or it is missing required invoice issue data — the original PDF is renamed in place by appending `.skp`:
 
 ```
 invoice-001.pdf.skp
 ```
 
+The same `.skp` rename is applied to other **deterministic** failures that would otherwise repeat on every run (for example a Google Sheets write that produced no data to write because the field mappings are empty). **Transient** failures — intentional 5-minute timeouts, network errors, or Google Sheets being unreachable after retries — do **not** mark the file; it is left in place and retried on the next run. The single configuration exception is a Google Sheets misconfiguration / permission error, which aborts the whole run and leaves the file untouched for the next run after the configuration is corrected.
+
 `.skp` files are not picked up by folder processing because only files whose extension is exactly `.pdf` are scanned.
 
 # Notes per workflow
 
-- **NuDelta** — polls for the result with exponential backoff (up to 5 attempts, 1-second base delay). The outer operation also retries on exception with a 1-second delay (up to 5 attempts).
-- **OpenAIResponses** — the inner HTTP client retries on HTTP 429 / 5xx with exponential backoff (3 attempts). The outer operation also retries on exception with exponential backoff (3 attempts).
-- **AzureDocumentIntelligence** — checks the configured internal monthly page guard before every Azure submission attempt, then retries transient extraction failures with exponential backoff (3 retries, 2 s → 4 s → 8 s). `OperationCanceledException`, quota guard stops, and Azure `RequestFailedException` 4xx responses are not retried by the outer policy. Azure SDK retries are disabled for this client so every retryable submission attempt passes through the quota guard. PDF upload happens after the Azure retry block, so an upload failure does not resubmit the document to Azure in the same run.
+- **NuDelta** — polls for the result with exponential backoff (up to 5 attempts, `2^n`-second delay: 2 s → 4 s → 8 s → …). The outer operation also retries on exception with a fixed 1-second delay (up to 5 attempts). The optional PDF upload happens **after** the retry block, so an upload failure does not re-run extraction or re-upload to NuDelta in the same run.
+- **OpenAIResponses** — the inner HTTP client retries on HTTP 429 / 5xx with exponential backoff (3 attempts). The outer operation also retries on exception with exponential backoff (3 attempts). The optional PDF upload happens **after** the retry block, so an upload failure does not re-call the paid OpenAI API in the same run.
+- **AzureDocumentIntelligence** — checks the configured internal monthly page guard before every Azure submission attempt, then applies two nested retry policies: when Azure is **not responding** (transient/network errors, HTTP 5xx) the extraction is retried **twice** with exponential backoff (2 s → 4 s); when Azure responds but returns **no usable invoice data** (an empty or unparseable result, or a result that does not look like an invoice) the extraction is retried **once** (2 s delay) and, if it still has no data, the document is marked `.skp`. `OperationCanceledException`, quota guard stops, and Azure `RequestFailedException` 4xx responses are not retried by the not-responding policy. Azure SDK retries are disabled for this client so every retryable submission attempt passes through the quota guard.
+
+For all three workflows the optional PDF upload happens **after** the extraction retry block, so an upload failure never resubmits the document to the extraction service in the same run.
 
 ---
 
 # Resilience — timeouts and retries
 
-The application is designed so that a network outage or a service disruption during any stage of processing always leaves the source file untouched. The next run will pick it up and try again.
+The application distinguishes between **transient** failures and **permanent** ones, so that no file is lost and no file is reprocessed in an endless loop:
 
-## File-safety guarantee
+- A **transient or downstream** failure during any stage — a network outage, a service disruption, or an intentional 5-minute timeout — always leaves the source file **untouched**. The next run picks it up and tries again.
+- A **permanently unprocessable** document is renamed to `.skp` so it is not retried on every run.
+- A **Google Sheets misconfiguration / permission** error aborts the whole run and leaves the file untouched for manual correction.
 
-A file is only renamed/deleted **after all of the following have succeeded**:
+## File-handling guarantee
+
+A file is renamed to `.bak` **only after all of the following have succeeded**:
 1. PDF extraction (NuDelta / OpenAI / Azure DI)
 2. PDF upload to public URL *(if `UploadPDF:Enabled` is `"true"`)*
 3. Google Sheets row write
 
-If any transient or downstream step fails — even after all retries are exhausted — the file stays in place. Permanently unprocessable documents are renamed to `.skp` so they are not submitted repeatedly.
+If a step fails, the outcome depends on the cause:
+
+- **Transient / downstream failures stay in place.** Intentional 5-minute timeouts (`OperationCanceledException` / `TaskCanceledException`), network errors (`HttpRequestException`, `IOException`), a failed PDF upload (PDF2URL timeout or error), and Google Sheets being unreachable after retries leave the file untouched so the next run can retry it. An intentional timeout therefore never permanently skips a file.
+- **Permanently unprocessable documents are marked `.skp`.** This covers documents rejected as unsupported/invalid, where no invoice is found, or where required issue data is missing — plus deterministic failures that would otherwise repeat every run (for example a Google Sheets write that produced no data because the mappings are empty).
+- **Misconfiguration aborts the run.** A Google Sheets misconfiguration or permission error (wrong spreadsheet/tab, missing share permission, invalid credentials) affects every file, so the whole run is aborted, the current file is left untouched (NOT marked `.skp`), and the run resumes on the next scheduled invocation once the configuration is corrected.
 
 For the AzureDocumentIntelligence workflow, the internal monthly quota counter is updated immediately after Azure accepts a document submission, before polling, PDF upload, or Google Sheets writes. This prevents post-submission failures from causing uncounted repeat submissions.
 
@@ -249,8 +269,8 @@ For the AzureDocumentIntelligence workflow, the internal monthly quota counter i
 | **Azure DI polling** | 5 minutes | `OperationCanceledException` thrown; not retried by the outer policy |
 | **NuDelta HTTP client** (upload + poll requests) | 5 minutes per request | `TaskCanceledException` thrown; propagates to outer retry policy |
 | **OpenAI HTTP client** | 5 minutes per request | `TaskCanceledException` thrown; propagates to outer retry policy |
-| **Google Sheets API calls** (all three calls per write) | 5 minutes per call | `OperationCanceledException` thrown; propagates as a write failure — file stays |
-| **PDF2URL process** | 5 minutes | Process is killed; empty URL returned → write not attempted → file stays |
+| **Google Sheets API calls** (all three calls per write) | 5 minutes per call | `OperationCanceledException` thrown; surfaced as a Google Sheets communication failure (transient) → file left untouched, retried next run |
+| **PDF2URL process** | 5 minutes | Process is killed; empty URL returned. The upload failure is treated as a transient downstream error → file left untouched, retried next run |
 
 ## Retry policies
 
@@ -260,8 +280,9 @@ For the AzureDocumentIntelligence workflow, the internal monthly quota counter i
 | **NuDelta inner** (result polling) | up to 5 | Exponential (`2^n` s) | Document state is not `done` |
 | **OpenAI outer** (whole operation) | up to 3 | Exponential (`2^n` s) | Any exception except `OperationCanceledException` and permanent skip outcomes |
 | **OpenAI inner** (HTTP call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx or HTTP 429 |
-| **Azure DI** (extraction only) | up to 3 retries | Exponential (`2^n` s) | Transient exceptions except `OperationCanceledException`, permanent skip outcomes, Azure quota guard stops, and Azure `RequestFailedException` 4xx responses |
-| **Google Sheets** (each API call) | up to 3 | Exponential (`2^n` s) | HTTP 5xx, HTTP 429, `HttpRequestException`, `IOException` |
+| **Azure DI — not responding** (extraction) | up to 2 | Exponential (`2^n` s: 2 s → 4 s) | Transient exceptions except `OperationCanceledException`, permanent skip outcomes, Azure quota guard stops, and Azure `RequestFailedException` 4xx responses |
+| **Azure DI — no usable data** (extraction) | up to 1 | 2 s fixed | Empty/unparseable result, or a response that does not look like an invoice; if it still has no data the file is marked `.skp` |
+| **Google Sheets** (each API call) | up to 2 | Exponential (`2^n` s) | HTTP 5xx, HTTP 429, `HttpRequestException`, `IOException` |
 
 `OperationCanceledException` is never retried in any policy — it signals an intentional 5-minute timeout and should propagate immediately so the file is left untouched for the next run.
 
@@ -269,9 +290,12 @@ For the AzureDocumentIntelligence workflow, the internal monthly quota counter i
 
 When `AzureDocumentIntelligence:MonthlyPageLimit` is greater than `0`, the app keeps a UTC-month counter in JSON. Before each Azure submission attempt, including retry attempts, it counts the local PDF pages and stops the batch without calling Azure if the monthly limit has already been reached or the next document would exceed it. The source PDF is left untouched and the log records that the internally configured monthly page quota has been achieved or would be exceeded.
 
-## Spreadsheet name verification
+## Spreadsheet and tab verification
 
-Before processing any files the application fetches the spreadsheet title and compares it to `GoogleSheets:ExpectedSpreadsheetName`. If the names do not match, or if the API call fails after 3 retries, the application logs the error and exits without processing any files. This prevents writing data to the wrong spreadsheet when `SpreadsheetId` is misconfigured.
+Before processing any files the application runs two independent checks and exits without processing anything if either fails:
+
+1. **Spreadsheet title** — it fetches the spreadsheet title and compares it to `GoogleSheets:ExpectedSpreadsheetName`. If the names do not match (or the API call fails after 2 retries), the run is aborted. Leave `ExpectedSpreadsheetName` blank to skip this check. This prevents writing data to the wrong spreadsheet when `SpreadsheetId` is misconfigured.
+2. **Tab (sheet) name** — it verifies that a tab whose name exactly matches `GoogleSheets:SheetName` exists. The match is case-sensitive: a tab that differs only in casing is rejected and the available tab names are logged. If no matching tab is found (or the API call fails after 2 retries), the run is aborted. This prevents writing to the wrong tab when `SheetName` is misconfigured.
 
 ---
 

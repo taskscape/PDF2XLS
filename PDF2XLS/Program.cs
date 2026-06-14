@@ -259,15 +259,15 @@ class Program
                         string? r = await nuDeltaProcessor.ProcessPdfAsync(inputFilePath);
                         root = r != null ? JsonNode.Parse(r) : null;
                         EnsureInvoiceIssueData(root, "NuDelta");
-
-                        if (UploadPDFStatus)
-                        {
-                            documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
-                            if (!StringHelper.IsValidHttpUrl(documentLink))
-                                throw new Exception("Document failed to upload");
-                            Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
-                        }
                     });
+
+                    if (UploadPDFStatus)
+                    {
+                        documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
+                        if (!StringHelper.IsValidHttpUrl(documentLink))
+                            throw new PdfUploadException("Document failed to upload");
+                        Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
+                    }
 
                     break;
                 }
@@ -297,15 +297,15 @@ class Program
                         string? r = await openAIProcessor.ProcessPdfAsync(inputFilePath);
                         root = r != null ? JsonNode.Parse(r) : null;
                         EnsureInvoiceIssueData(root, "OpenAI Responses");
-
-                        if (UploadPDFStatus)
-                        {
-                            documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
-                            if (!StringHelper.IsValidHttpUrl(documentLink))
-                                throw new Exception("Document failed to upload");
-                            Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
-                        }
                     });
+
+                    if (UploadPDFStatus)
+                    {
+                        documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
+                        if (!StringHelper.IsValidHttpUrl(documentLink))
+                            throw new PdfUploadException("Document failed to upload");
+                        Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
+                    }
 
                     break;
                 }
@@ -372,7 +372,7 @@ class Program
                     {
                         documentLink = await RunPDF2URL(PDF2URLPath, inputFilePath);
                         if (!StringHelper.IsValidHttpUrl(documentLink))
-                            throw new Exception("Document failed to upload");
+                            throw new PdfUploadException("Document failed to upload");
                         Log.Information("PDF uploaded. DocumentLink: {Link}. File: {file}", documentLink, inputFilePath);
                     }
 
@@ -452,11 +452,10 @@ class Program
         {
             stopwatch.Stop();
             Environment.ExitCode = 1;
-            string? skippedPath = TryMarkFileAsSkipped(inputFilePath);
-            Console.WriteLine("Google Sheets could not be communicated. The file will be marked as skipped.");
+            Console.WriteLine("Google Sheets could not be communicated. The file is left unchanged and will be retried on the next run.");
             Log.Error(e,
-                "Processing FAILED — Google Sheets could not be communicated after retries. File marked as skipped to avoid reprocessing. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file} | SkippedFile: {SkippedFile}",
-                RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath, skippedPath);
+                "Processing FAILED — Google Sheets could not be communicated after retries (transient). File left UNCHANGED (NOT marked as skipped); it will be retried automatically on the next run. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
+                RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
             return true;
         }
         catch (SkippedDocumentException e)
@@ -475,6 +474,19 @@ class Program
         {
             stopwatch.Stop();
             Environment.ExitCode = 1;
+
+            // Intentional 5-minute timeouts (OperationCanceledException) and other transient/
+            // downstream failures must NOT permanently skip the file — leave it in place so the
+            // next run can try again. Only genuinely unprocessable documents are marked .skp.
+            if (IsTransientFailure(e))
+            {
+                Console.WriteLine("A transient error occurred while processing the file. It is left unchanged and will be retried on the next run.");
+                Log.Error(e,
+                    "Processing FAILED ({ExceptionType}: {ExceptionMessage}) due to a transient/timeout condition. File left UNCHANGED (NOT marked as skipped); it will be retried automatically on the next run. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
+                    e.GetType().Name, e.Message, RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
+                return true;
+            }
+
             string? skippedPath = TryMarkFileAsSkipped(inputFilePath);
             Console.WriteLine("There was an error while processing the file. The file will be marked as skipped.");
             Log.Error(e,
@@ -482,6 +494,30 @@ class Program
                 e.GetType().Name, e.Message, RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath, skippedPath);
             return true;
         }
+    }
+
+    /// <summary>
+    /// Returns true when the exception (or any inner exception) represents a transient or
+    /// downstream/infrastructure failure — e.g. an intentional 5-minute timeout
+    /// (<see cref="OperationCanceledException"/>), a network error, or Google Sheets being
+    /// temporarily unreachable. Such failures leave the source file in place for the next run.
+    /// </summary>
+    private static bool IsTransientFailure(Exception? ex)
+    {
+        while (ex is not null)
+        {
+            if (ex is OperationCanceledException        // includes TaskCanceledException (5-minute timeouts)
+                or TimeoutException
+                or HttpRequestException
+                or IOException
+                or PdfUploadException
+                or GoogleSheetsCommunicationException)
+                return true;
+
+            ex = ex.InnerException;
+        }
+
+        return false;
     }
 
     private static bool ShouldRetryAzureDocumentIntelligenceException(Exception ex)
@@ -605,5 +641,22 @@ class Program
             uploadStopwatch.Elapsed.TotalSeconds, filePath);
 
         return output.TrimEnd();
+    }
+}
+
+/// <summary>
+/// Raised when the optional PDF upload (PDF2URL) fails or times out. This is a transient
+/// downstream failure: the source file is left in place so the next run can retry it.
+/// </summary>
+public sealed class PdfUploadException : Exception
+{
+    public PdfUploadException(string message)
+        : base(message)
+    {
+    }
+
+    public PdfUploadException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
