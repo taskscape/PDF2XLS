@@ -58,6 +58,13 @@ class Program
             ConfigureLogger();
 
             Log.Information("Starting PDF2XLS application, Run ID: {RunID}", RunID);
+            Log.Information(
+                "Invocation — Exe: {Exe} | PreferredAPI: {Api} | UploadPDF: {UploadEnabled} | ArgCount: {ArgCount} | Args: {Args}",
+                exePath,
+                PreferredApi,
+                UploadPDFStatus,
+                args.Length,
+                args.Select(a => $"\"{a}\"").ToArray());
 
             if (args.Length < 1)
             {
@@ -158,10 +165,12 @@ class Program
         }
         catch (Exception ex)
         {
-            Log.Fatal(ex, "An unhandled exception occurred in Main.");
+            Environment.ExitCode = 1;
+            Log.Fatal(ex, "An unhandled exception occurred in Main ({ExceptionType}: {ExceptionMessage}).", ex.GetType().Name, ex.Message);
         }
         finally
         {
+            Log.Information("PDF2XLS application exiting with code {ExitCode}.", Environment.ExitCode);
             await Log.CloseAndFlushAsync();
         }
     }
@@ -357,7 +366,8 @@ class Program
 
             if (!sheetsSuccess)
             {
-                Log.Warning("Google Sheets write failed — file will NOT be archived. File: {file}", inputFilePath);
+                Environment.ExitCode = 1;
+                Log.Warning("Google Sheets write failed — file left UNCHANGED in folder (not archived). File: {file}", inputFilePath);
             }
             else
             {
@@ -408,9 +418,10 @@ class Program
         {
             stopwatch.Stop();
             Console.WriteLine("There was an error while processing the file. Please try again.");
+            Environment.ExitCode = 1;
             Log.Error(e,
-                "Processing FAILED. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
-                RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
+                "Processing FAILED ({ExceptionType}: {ExceptionMessage}). File left UNCHANGED in folder (not archived). RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
+                e.GetType().Name, e.Message, RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
             return true;
         }
     }
@@ -490,31 +501,50 @@ class Program
             Arguments = $"\"{filePath}\"",
             UseShellExecute = false,
             RedirectStandardOutput = true,
+            RedirectStandardError = true,
             CreateNoWindow = true
         };
 
-        using var process = Process.Start(startInfo);
-        if (process == null) return string.Empty;
+        var uploadStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        Log.Information("Starting PDF upload via PDF2URL: {Exe} \"{file}\"", exePath, filePath);
 
-        // Read stdout asynchronously to avoid pipe-buffer deadlock with WaitForExit.
-        Task<string> readTask = process.StandardOutput.ReadToEndAsync();
+        using var process = Process.Start(startInfo);
+        if (process == null)
+        {
+            Log.Warning("PDF2URL process could not be started ({Exe}). File: {file}", exePath, filePath);
+            return string.Empty;
+        }
+
+        // Read stdout/stderr asynchronously to avoid pipe-buffer deadlock with WaitForExit.
+        Task<string> readOutputTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> readErrorTask = process.StandardError.ReadToEndAsync();
 
         bool exited = process.WaitForExit(300_000); // 5-minute timeout
         if (!exited)
         {
             try { process.Kill(); } catch { /* best effort */ }
-            Log.Warning("PDF2URL process timed out after 5 minutes and was killed. File: {file}", filePath);
+            uploadStopwatch.Stop();
+            Log.Warning(
+                "PDF2URL process timed out after {Elapsed:F1}s (5-minute limit) and was killed. File: {file}",
+                uploadStopwatch.Elapsed.TotalSeconds, filePath);
             return string.Empty;
         }
 
-        string output = await readTask;
+        string output = await readOutputTask;
+        string error = await readErrorTask;
+        uploadStopwatch.Stop();
 
         if (process.ExitCode != 0)
         {
-            Log.Warning("PDF2URL exited with code {Code}. Output: {Output}. File: {file}",
-                process.ExitCode, output.TrimEnd(), filePath);
+            Log.Warning(
+                "PDF2URL exited with code {Code} after {Elapsed:F1}s. Stdout: {Output} | Stderr: {Error}. File: {file}",
+                process.ExitCode, uploadStopwatch.Elapsed.TotalSeconds, output.TrimEnd(), error.TrimEnd(), filePath);
             return string.Empty;
         }
+
+        Log.Information(
+            "PDF upload finished in {Elapsed:F1}s. File: {file}",
+            uploadStopwatch.Elapsed.TotalSeconds, filePath);
 
         return output.TrimEnd();
     }

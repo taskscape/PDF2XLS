@@ -77,8 +77,22 @@ public class AzureDocumentIntelligenceProcessor
                 _quotaTracker?.RecordSuccessfulSubmission(filePath, documentPageCount.Value);
             }
 
+            Log.Information(
+                "Polling Azure Document Intelligence for completion (5-minute limit). OperationId: {OperationId}. File: {file}",
+                operation.Id, filePath);
+
             using CancellationTokenSource pollCts = new(TimeSpan.FromMinutes(5));
-            await operation.WaitForCompletionAsync(pollCts.Token);
+            try
+            {
+                await operation.WaitForCompletionAsync(pollCts.Token);
+            }
+            catch (OperationCanceledException) when (pollCts.IsCancellationRequested)
+            {
+                Log.Warning(
+                    "Azure Document Intelligence polling timed out after 5 minutes (operation did not complete). OperationId: {OperationId}. File: {file}",
+                    operation.Id, filePath);
+                throw;
+            }
 
             AnalyzeResult result = operation.Value;
 
