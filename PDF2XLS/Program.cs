@@ -142,8 +142,11 @@ class Program
                     inputResult.Files.Count);
             }
 
+            int processedCount = 0;
             foreach (string inputFilePath in inputResult.Files)
             {
+                processedCount++;
+
                 if (azureQuotaTracker?.IsQuotaLimitReached() == true)
                 {
                     azureQuotaTracker.LogQuotaLimitReached();
@@ -155,7 +158,13 @@ class Program
                 {
                     bool shouldContinue = await ProcessFileAsync(inputFilePath, config, azureQuotaTracker);
                     if (!shouldContinue)
+                    {
+                        int remaining = inputResult.Files.Count - processedCount;
+                        Log.Warning(
+                            "Run stopped early after a blocking condition. {Remaining} of {Total} file(s) were not processed and will be retried automatically on the next scheduled run.",
+                            remaining, inputResult.Files.Count);
                         break;
+                    }
                 }
                 finally
                 {
@@ -306,30 +315,54 @@ class Program
                 {
                     AzureDocumentIntelligenceProcessor azDIProcessor = new(config, azureQuotaTracker);
 
-                    AsyncRetryPolicy azDIRetry = Policy
+                    // Retry ONCE when Azure Document Intelligence returns no usable invoice
+                    // data (empty/unparseable result or not invoice-like). If it still has no
+                    // data afterwards, the SkippedDocumentException propagates and the file is
+                    // marked with the .skp extension.
+                    AsyncRetryPolicy azDINoDataRetry = Policy
+                        .Handle<SkippedDocumentException>()
+                        .WaitAndRetryAsync(
+                            retryCount: 1,
+                            sleepDurationProvider: _ => TimeSpan.FromSeconds(2),
+                            onRetry: (ex, ts, count, _) =>
+                            {
+                                Console.WriteLine(
+                                    $"Retry {count} (no usable data) after {ts.TotalSeconds}s: {ex.Message}");
+                                Log.Warning(ex,
+                                    "Azure Document Intelligence returned no usable invoice data. Retry {Count} of 1 after {Delay}s. Reason: {Reason}. File: {file}",
+                                    count, ts.TotalSeconds, ex.Message, inputFilePath);
+                            });
+
+                    // Retry TWICE when Azure Document Intelligence is not responding
+                    // (transient/network errors, HTTP 5xx, etc.).
+                    AsyncRetryPolicy azDINotRespondingRetry = Policy
                         .Handle<Exception>(ShouldRetryAzureDocumentIntelligenceException)
                         .WaitAndRetryAsync(
-                            retryCount: 3,
+                            retryCount: 2,
                             sleepDurationProvider: attempt =>
                                 TimeSpan.FromSeconds(Math.Pow(2, attempt)),
                             onRetry: (ex, ts, count, _) =>
                             {
                                 Console.WriteLine(
-                                    $"Retry {count} after {ts.TotalSeconds}s due to: {ex.Message}");
+                                    $"Retry {count} (not responding) after {ts.TotalSeconds}s: {ex.Message}");
                                 Log.Warning(ex,
-                                    "Azure Document Intelligence retry {Count} after {Delay}s. File: {file}",
-                                    count, ts.TotalSeconds, inputFilePath);
+                                    "Azure Document Intelligence not responding. Retry {Count} of 2 after {Delay}s. Reason: {Reason}. File: {file}",
+                                    count, ts.TotalSeconds, ex.Message, inputFilePath);
                             });
 
-                    await azDIRetry.ExecuteAsync(async () =>
+                    // Inner policy (no-data, retry once) runs closest to the call; the outer
+                    // policy (not-responding, retry twice) wraps it.
+                    var azDIPolicy = Policy.WrapAsync(azDINotRespondingRetry, azDINoDataRetry);
+
+                    await azDIPolicy.ExecuteAsync(async () =>
                     {
                         string? r = await azDIProcessor.ProcessPdfAsync(inputFilePath);
 
                         root = r != null ? JsonNode.Parse(r) : null;
                         if (root == null)
                         {
-                            throw new InvalidOperationException(
-                                "Azure Document Intelligence returned no result");
+                            throw new SkippedDocumentException(
+                                "Azure Document Intelligence returned no usable result (empty or unparseable response).");
                         }
 
                         EnsureInvoiceIssueData(root, "Azure Document Intelligence");
@@ -367,7 +400,10 @@ class Program
             if (!sheetsSuccess)
             {
                 Environment.ExitCode = 1;
-                Log.Warning("Google Sheets write failed — file left UNCHANGED in folder (not archived). File: {file}", inputFilePath);
+                string? skippedPath = TryMarkFileAsSkipped(inputFilePath);
+                Log.Warning(
+                    "Google Sheets had no data to write (check field mappings). File marked as skipped to avoid reprocessing. File: {file} | SkippedFile: {SkippedFile}",
+                    inputFilePath, skippedPath);
             }
             else
             {
@@ -402,6 +438,27 @@ class Program
                 RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
             return false;
         }
+        catch (GoogleSheetsConfigurationException e)
+        {
+            stopwatch.Stop();
+            Console.WriteLine("Google Sheets is misconfigured or access was denied. The whole run has been aborted; no files were skipped. Fix the configuration before the next run.");
+            Environment.ExitCode = 1;
+            Log.Error(e,
+                "RUN ABORTED — Google Sheets is misconfigured or permission was denied ({Reason}). This is a configuration problem that affects every file, so the entire run is being stopped without processing any further documents. The current file is left UNCHANGED (NOT marked as skipped) and will be retried automatically on the next scheduled run once the configuration is corrected. Review 'GoogleSheets:SpreadsheetId', 'GoogleSheets:SheetName', 'GoogleSheets:ServiceAccountFile', and the service account's share/permission on the spreadsheet. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
+                e.Message, RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
+            return false;
+        }
+        catch (GoogleSheetsCommunicationException e)
+        {
+            stopwatch.Stop();
+            Environment.ExitCode = 1;
+            string? skippedPath = TryMarkFileAsSkipped(inputFilePath);
+            Console.WriteLine("Google Sheets could not be communicated. The file will be marked as skipped.");
+            Log.Error(e,
+                "Processing FAILED — Google Sheets could not be communicated after retries. File marked as skipped to avoid reprocessing. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file} | SkippedFile: {SkippedFile}",
+                RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath, skippedPath);
+            return true;
+        }
         catch (SkippedDocumentException e)
         {
             stopwatch.Stop();
@@ -417,11 +474,12 @@ class Program
         catch (Exception e)
         {
             stopwatch.Stop();
-            Console.WriteLine("There was an error while processing the file. Please try again.");
             Environment.ExitCode = 1;
+            string? skippedPath = TryMarkFileAsSkipped(inputFilePath);
+            Console.WriteLine("There was an error while processing the file. The file will be marked as skipped.");
             Log.Error(e,
-                "Processing FAILED ({ExceptionType}: {ExceptionMessage}). File left UNCHANGED in folder (not archived). RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file}",
-                e.GetType().Name, e.Message, RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath);
+                "Processing FAILED ({ExceptionType}: {ExceptionMessage}). File marked as skipped to avoid reprocessing. RunID: {RunID} | Elapsed: {Elapsed:F1}s | File: {file} | SkippedFile: {SkippedFile}",
+                e.GetType().Name, e.Message, RunID, stopwatch.Elapsed.TotalSeconds, inputFilePath, skippedPath);
             return true;
         }
     }

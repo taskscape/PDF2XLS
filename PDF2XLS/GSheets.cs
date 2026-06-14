@@ -11,18 +11,20 @@ namespace PDF2XLS;
 
 public class GSheets
 {
-    // Retry on transient Google API failures (5xx, 429) and network errors.
+    // Retry twice on transient Google API failures (5xx, 429) and network errors
+    // ("Google Sheets cannot be communicated"). Configuration/permission errors
+    // (4xx) are NOT retried here and are surfaced as GoogleSheetsConfigurationException.
     // OperationCanceledException (our 5-min timeout) is intentionally excluded.
     private static readonly AsyncRetryPolicy SheetsRetryPolicy = Policy
         .Handle<Google.GoogleApiException>(ex => (int)ex.HttpStatusCode >= 500 || (int)ex.HttpStatusCode == 429)
         .Or<HttpRequestException>()
         .Or<IOException>()
         .WaitAndRetryAsync(
-            retryCount: 3,
+            retryCount: 2,
             sleepDurationProvider: attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt)),
             onRetry: (ex, ts, attempt, _) =>
-                Log.Warning(ex, "Google Sheets transient error. Retry {Attempt} after {Delay:F1}s",
-                    attempt, ts.TotalSeconds));
+                Log.Warning(ex, "Google Sheets could not be communicated (transient error). Retry {Attempt} of 2 after {Delay:F1}s. Reason: {Reason}",
+                    attempt, ts.TotalSeconds, ex.Message));
 
     private IConfiguration Config { get; }
     private readonly string _serviceAccountFile;
@@ -220,8 +222,10 @@ public class GSheets
 
             if (sheetId == null)
             {
-                Log.Error("Sheet {sheetName} not found in spreadsheet {spreadsheetId}", _sheetName, _spreadsheetId);
-                return false;
+                // The configured sheet/tab does not exist — this is a configuration problem,
+                // not something a retry can fix. Surface it so the run can be terminated.
+                throw new GoogleSheetsConfigurationException(
+                    $"Sheet '{_sheetName}' not found in spreadsheet '{_spreadsheetId}'. Check 'GoogleSheets:SheetName'.");
             }
 
             string range = $"{_sheetName}!A:Z";
@@ -301,13 +305,37 @@ public class GSheets
                 return false;
             }
         }
+        catch (GoogleSheetsConfigurationException)
+        {
+            // Already a classified configuration/permission failure — propagate to terminate the run.
+            throw;
+        }
+        catch (Google.GoogleApiException ex) when (IsConfigurationOrPermissionError(ex))
+        {
+            Log.Error(ex,
+                "Google Sheets is misconfigured or access was denied (HTTP {Status}). File: {file}",
+                (int)ex.HttpStatusCode, _inputFilePath);
+            throw new GoogleSheetsConfigurationException(
+                $"Google Sheets is misconfigured or access was denied (HTTP {(int)ex.HttpStatusCode}).", ex);
+        }
         catch (Exception ex)
         {
-            Log.Error("An error occurred during batch update: {message}. File: {file}", ex.Message, _inputFilePath);
-            return false;
+            // Anything left here (5xx/429 after retries, network/IO errors, request timeout)
+            // means Google Sheets could not be communicated.
+            Log.Error(ex,
+                "Google Sheets could not be communicated after retries: {message}. File: {file}",
+                ex.Message, _inputFilePath);
+            throw new GoogleSheetsCommunicationException(
+                "Google Sheets could not be communicated after retries.", ex);
         }
     }
-    
+
+    private static bool IsConfigurationOrPermissionError(Google.GoogleApiException ex)
+    {
+        int status = (int)ex.HttpStatusCode;
+        return status is 400 or 401 or 403 or 404;
+    }
+
     private static bool TryParseFlexibleDecimal(string? raw, out decimal result)
     {
         result = 0;
@@ -334,5 +362,34 @@ public class GSheets
             CultureInfo.InvariantCulture,
             out result
         );
+    }
+}
+
+/// <summary>
+/// Raised when Google Sheets is misconfigured or access is denied (e.g. wrong sheet/tab,
+/// missing share permission, invalid credentials). The run should terminate; the file is NOT skipped.
+/// </summary>
+public sealed class GoogleSheetsConfigurationException : Exception
+{
+    public GoogleSheetsConfigurationException(string message)
+        : base(message)
+    {
+    }
+
+    public GoogleSheetsConfigurationException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// Raised when Google Sheets could not be communicated after the configured retries
+/// (transient 5xx/429, network/IO errors, or request timeout).
+/// </summary>
+public sealed class GoogleSheetsCommunicationException : Exception
+{
+    public GoogleSheetsCommunicationException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
