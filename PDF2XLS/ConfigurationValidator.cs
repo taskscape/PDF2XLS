@@ -53,8 +53,9 @@ public static class ConfigurationValidator
                     errors.Add("OpenAI:OpenAI_APIKey is required for the OpenAIResponses workflow");
                 if (string.IsNullOrWhiteSpace(config["OpenAI:OpenAI_Model"]))
                     errors.Add("OpenAI:OpenAI_Model is required for the OpenAIResponses workflow");
-                if (string.IsNullOrWhiteSpace(config["OpenAI:Prompt"]))
-                    errors.Add("OpenAI:Prompt is required for the OpenAIResponses workflow");
+                string? promptValidationError = PromptFileLoader.GetValidationError(config);
+                if (promptValidationError != null)
+                    errors.Add(promptValidationError);
                 break;
 
             case "AzureDocumentIntelligence":

@@ -5,7 +5,22 @@
     "data": {
       "type": "object",
       "properties": {
-        "invn": { "type": "string" },
+        "invn": {
+          "type": "string",
+          "description": "Resolved primary document number. Prefer invoiceId, then noteNumber, then transactionId."
+        },
+        "invoiceId": {
+          "type": "string",
+          "description": "Identifier explicitly labelled as Invoice ID, Invoice Number, Document Number, Faktura nr, or Nr faktury."
+        },
+        "noteNumber": {
+          "type": "string",
+          "description": "Number following a Polish accounting/debit-note label."
+        },
+        "transactionId": {
+          "type": "string",
+          "description": "Identifier explicitly labelled as Transaction ID."
+        },
         "reference": { "type": "string" },
         "issue": { "type": "string", "format": "date-time" },
         "sale": { "type": "string", "format": "date-time" },

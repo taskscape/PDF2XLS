@@ -24,7 +24,7 @@ public class OpenAIResponsesProcessor
     {
         _apiKey = config["OpenAI:OpenAI_APIKey"] ?? string.Empty;
         _model = config["OpenAI:OpenAI_Model"] ?? string.Empty;
-        _prompt = config["OpenAI:Prompt"]?.Replace("{schema}", responseSchema) ?? string.Empty;
+        _prompt = PromptFileLoader.LoadAndRender(config, responseSchema);
     }
 
     /// <summary>
