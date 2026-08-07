@@ -20,6 +20,21 @@ public sealed class PromptFileLoaderTests
     }
 
     [Fact]
+    public void LoadAndRender_AcceptsFullyQualifiedPromptPath()
+    {
+        using TemporaryPromptDirectory temporaryDirectory = new();
+        temporaryDirectory.WritePrompt("Before {schema} After");
+        IConfiguration config = BuildConfiguration(temporaryDirectory.PromptPath);
+
+        string rendered = PromptFileLoader.LoadAndRender(
+            config,
+            "{\"type\":\"object\"}",
+            temporaryDirectory.Path);
+
+        Assert.Equal("Before {\"type\":\"object\"} After", rendered);
+    }
+
+    [Fact]
     public void GetValidationError_RejectsMissingPromptFile()
     {
         using TemporaryPromptDirectory temporaryDirectory = new();
@@ -46,9 +61,35 @@ public sealed class PromptFileLoaderTests
     }
 
     [Fact]
+    public void GetValidationError_RejectsRelativeBaseDirectory()
+    {
+        IConfiguration config = BuildConfiguration("prompts/test-prompt.txt");
+
+        string? error = PromptFileLoader.GetValidationError(config, "relative-root");
+
+        Assert.Contains("base directory must be fully qualified", error);
+    }
+
+    [Theory]
+    [InlineData(@"C:prompt.txt")]
+    [InlineData(@"\prompt.txt")]
+    public void GetValidationError_RejectsAmbiguousWindowsRootedPath(string promptPath)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using TemporaryPromptDirectory temporaryDirectory = new();
+        IConfiguration config = BuildConfiguration(promptPath);
+
+        string? error = PromptFileLoader.GetValidationError(config, temporaryDirectory.Path);
+
+        Assert.Contains("either a relative path or a fully qualified path", error);
+    }
+
+    [Fact]
     public void ShippedPrompt_DefinesRequiredSynonymsAndPrecedence()
     {
-        string promptPath = System.IO.Path.Combine(
+        string promptPath = System.IO.Path.Join(
             AppContext.BaseDirectory,
             "prompts",
             "invoice-extraction.txt");
@@ -70,7 +111,7 @@ public sealed class PromptFileLoaderTests
     {
         using TemporaryPromptDirectory temporaryDirectory = new();
         temporaryDirectory.WritePrompt("Extract using {schema}");
-        string serviceAccountPath = System.IO.Path.Combine(
+        string serviceAccountPath = System.IO.Path.Join(
             temporaryDirectory.Path,
             "service-account.json");
         File.WriteAllText(serviceAccountPath, "{}");
@@ -84,9 +125,7 @@ public sealed class PromptFileLoaderTests
                 ["GoogleSheets:ApplicationName"] = "PDF2XLS.Tests",
                 ["OpenAI:OpenAI_APIKey"] = "test-key",
                 ["OpenAI:OpenAI_Model"] = "test-model",
-                [PromptFileLoader.ConfigurationKey] = System.IO.Path.Combine(
-                    temporaryDirectory.Path,
-                    temporaryDirectory.RelativePromptPath)
+                [PromptFileLoader.ConfigurationKey] = temporaryDirectory.PromptPath
             })
             .Build();
 
@@ -123,7 +162,7 @@ public sealed class PromptFileLoaderTests
     {
         public TemporaryPromptDirectory()
         {
-            Path = System.IO.Path.Combine(
+            Path = System.IO.Path.Join(
                 System.IO.Path.GetTempPath(),
                 "PDF2XLS.Tests",
                 Guid.NewGuid().ToString("N"));
@@ -131,13 +170,13 @@ public sealed class PromptFileLoaderTests
         }
 
         public string Path { get; }
-        public string RelativePromptPath => System.IO.Path.Combine("prompts", "test-prompt.txt");
+        public string RelativePromptPath => System.IO.Path.Join("prompts", "test-prompt.txt");
+        public string PromptPath => System.IO.Path.Join(Path, RelativePromptPath);
 
         public void WritePrompt(string contents)
         {
-            string promptPath = System.IO.Path.Combine(Path, RelativePromptPath);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(promptPath)!);
-            File.WriteAllText(promptPath, contents);
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(PromptPath)!);
+            File.WriteAllText(PromptPath, contents);
         }
 
         public void Dispose()

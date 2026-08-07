@@ -45,10 +45,23 @@ public static class PromptFileLoader
         try
         {
             string root = baseDirectory ?? AppContext.BaseDirectory;
-            promptPath = Path.GetFullPath(
-                Path.IsPathRooted(configuredPath)
-                    ? configuredPath
-                    : Path.Combine(root, configuredPath));
+            if (!Path.IsPathFullyQualified(root))
+            {
+                throw new InvalidOperationException(
+                    $"Prompt base directory must be fully qualified: {root}");
+            }
+
+            bool isRooted = Path.IsPathRooted(configuredPath);
+            bool isFullyQualified = Path.IsPathFullyQualified(configuredPath);
+            if (isRooted && !isFullyQualified)
+            {
+                throw new InvalidOperationException(
+                    $"{ConfigurationKey} must be either a relative path or a fully qualified path: {configuredPath}");
+            }
+
+            promptPath = isFullyQualified
+                ? Path.GetFullPath(configuredPath)
+                : Path.GetFullPath(configuredPath, root);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
