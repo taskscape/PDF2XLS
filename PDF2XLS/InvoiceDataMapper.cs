@@ -14,7 +14,11 @@ public static class InvoiceDataMapper
         JsonNode? dataNode = root?["data"];
 
         // Top-level scalar fields
-        string invNumber       = GetValFromNode(dataNode?["invn"]);
+        string invNumber       = FirstNonEmpty(
+            GetValFromNode(dataNode?["invoiceId"]),
+            GetValFromNode(dataNode?["noteNumber"]),
+            GetValFromNode(dataNode?["transactionId"]),
+            GetValFromNode(dataNode?["invn"]));
         string refNumber       = GetValFromNode(dataNode?["reference"]);
         string issueDateString = GetValFromNode(dataNode?["issue"]);
         DateTime.TryParse(issueDateString, out DateTime issueDate);
@@ -109,4 +113,7 @@ public static class InvoiceDataMapper
 
         return node.ToString();
     }
+
+    private static string FirstNonEmpty(params string[] candidates) =>
+        candidates.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? string.Empty;
 }

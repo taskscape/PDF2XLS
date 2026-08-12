@@ -62,7 +62,8 @@ Then, depending on the workflow:
 2. Add credit / payment method under **Billing**. The Responses API with `input_file` requires a funded account.
 3. Go to **API keys → Create new secret key**. Copy the value (`sk-…`) into `OpenAI:OpenAI_APIKey`. You won't be able to see it again — store it safely.
 4. Choose a model that supports the `input_file` content type and set it in `OpenAI:OpenAI_Model`. Recommended: `gpt-4o-mini` (good cost/quality trade-off). Other supported options at the time of writing: `gpt-4o`, `gpt-4.1`, `gpt-4.1-mini`.
-5. Leave `OpenAI:Prompt` at the default unless you know what you're doing. The placeholder `{schema}` is substituted at runtime with the JSON schema the program expects — do **not** remove it.
+5. Leave `OpenAI:PromptFile` set to `prompts/invoice-extraction.txt` unless you want to load a different prompt file. Relative paths are resolved from the application directory. The configured file must exist, must not be empty, and must contain the `{schema}` placeholder exactly once; the application validates these conditions at startup.
+6. The shipped prompt recognizes `Transaction date` as the sale date, `Merchant` / `Merchant name` as the seller, and the supported English and Polish document-number labels. It resolves the document number in this order: Invoice ID, Polish accounting/debit-note number, then Transaction ID.
 
 > Cost note: each invoice costs a few cents on `gpt-4o-mini`. Larger / multi-page PDFs cost more because the file is sent as base64.
 
@@ -119,7 +120,7 @@ Set `UploadPDF:Enabled` to `"false"` to skip uploading.
 |---|---|---|---|
 | (root) | `PreferredAPI` | All | `NuDelta`, `OpenAIResponses`, or `AzureDocumentIntelligence`. |
 | `NuDeltaCredentials` | `Username`, `Password` | NuDelta | NuDelta Invoice portal login (HTTP Basic auth). |
-| `OpenAI` | `OpenAI_APIKey`, `OpenAI_Model`, `Prompt` | OpenAIResponses | OpenAI key, model id, and prompt containing `{schema}`. |
+| `OpenAI` | `OpenAI_APIKey`, `OpenAI_Model`, `PromptFile` | OpenAIResponses | OpenAI key, model id, and path to a readable prompt file containing `{schema}` exactly once. Relative paths are resolved from the application directory. |
 | `AzureDocumentIntelligence` | `Endpoint`, `ApiKey`, `MonthlyPageLimit`, `MonthlyQuotaCounterPath` | AzureDocumentIntelligence | Azure Document Intelligence endpoint/key and optional internal monthly page guard. `MonthlyPageLimit` is a non-negative integer; `0` disables the guard. `MonthlyQuotaCounterPath` may be blank to use `{app}/azure-document-intelligence-quota.json`. |
 | `GoogleSheets` | `ServiceAccountFile`, `SpreadsheetId`, `ExpectedSpreadsheetName`, `SheetName`, `ApplicationName`, `Mappings` | All | Google Sheets target. `ExpectedSpreadsheetName` is verified against the live spreadsheet title at startup; leave blank to skip the check. `Mappings` values are spreadsheet **column letters**. |
 | `UploadPDF` | `Enabled`, `PDF2URLPath` | Optional | Enable to upload the PDF and store the link in `DocumentLink`. |
