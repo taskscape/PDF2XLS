@@ -6,6 +6,7 @@ public static class InputPathResolver
     /// Resolves CLI input paths to one or more PDF files.
     /// Accepts a single .pdf file, multiple .pdf files, or a directory (top-level .pdf files only).
     /// When multiple paths are supplied, directories are expanded inline and duplicate files are skipped.
+    /// A missing .pdf whose sibling was already renamed to .skp is reported as already skipped.
     /// </summary>
     public static InputPathResult Resolve(IEnumerable<string?> inputPaths)
     {
@@ -21,7 +22,9 @@ public static class InputPathResolver
             return ResolveDirectory(normalizedPaths[0]);
 
         List<string> pdfFiles = [];
+        List<string> skippedFiles = [];
         HashSet<string> seenFiles = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seenSkippedFiles = new(StringComparer.OrdinalIgnoreCase);
 
         foreach (string path in normalizedPaths)
         {
@@ -52,7 +55,22 @@ public static class InputPathResolver
                 continue;
             }
 
+            string? skippedPath = FindSkippedSibling(path);
+            if (skippedPath != null)
+            {
+                if (seenSkippedFiles.Add(skippedPath))
+                    skippedFiles.Add(skippedPath);
+                continue;
+            }
+
             return InputPathResult.Failure($"Path does not exist: {path}", InputPathFailureKind.InvalidPath);
+        }
+
+        if (pdfFiles.Count == 0)
+        {
+            return InputPathResult.Failure(
+                FormatAlreadySkippedMessage(skippedFiles),
+                InputPathFailureKind.AlreadySkipped);
         }
 
         return InputPathResult.FromFiles(
@@ -97,13 +115,47 @@ public static class InputPathResolver
 
     private static bool IsPdfFile(string filePath) =>
         string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Finds a sibling created by <c>TryMarkFileAsSkipped</c>: <c>{path}.skp</c>, then
+    /// <c>{filename} (1).skp</c> … <c>{filename} (999).skp</c>.
+    /// </summary>
+    private static string? FindSkippedSibling(string path)
+    {
+        string preferred = $"{path}.skp";
+        if (File.Exists(preferred))
+            return preferred;
+
+        string? directory = Path.GetDirectoryName(path);
+        string fileName = Path.GetFileName(path);
+        if (string.IsNullOrEmpty(fileName))
+            return null;
+
+        for (int i = 1; i <= 999; i++)
+        {
+            string numberedName = $"{fileName} ({i}).skp";
+            string candidate = string.IsNullOrEmpty(directory)
+                ? numberedName
+                : Path.Combine(directory, numberedName);
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static string FormatAlreadySkippedMessage(IReadOnlyList<string> skippedFiles) =>
+        skippedFiles.Count == 1
+            ? $"File was already marked as skipped: {skippedFiles[0]}"
+            : $"Files were already marked as skipped: {string.Join("; ", skippedFiles)}";
 }
 
 public enum InputPathFailureKind
 {
     InvalidPath,
     NotPdf,
-    EmptyDirectory
+    EmptyDirectory,
+    AlreadySkipped
 }
 
 public sealed class InputPathResult

@@ -228,7 +228,7 @@ invoice-001.pdf.skp
 
 The same `.skp` rename is applied to other **deterministic** failures that would otherwise repeat on every run (for example a Google Sheets write that produced no data to write because the field mappings are empty). **Transient** failures — intentional 5-minute timeouts, network errors, or Google Sheets being unreachable after retries — do **not** mark the file; it is left in place and retried on the next run. The single configuration exception is a Google Sheets misconfiguration / permission error, which aborts the whole run and leaves the file untouched for the next run after the configuration is corrected.
 
-`.skp` files are not picked up by folder processing because only files whose extension is exactly `.pdf` are scanned.
+`.skp` files are not picked up by folder processing because only files whose extension is exactly `.pdf` are scanned. If a previously skipped file is passed again on the command line, the app reports that it was already marked as skipped (instead of `Path does not exist`) and exits without reprocessing it.
 
 # Notes per workflow
 

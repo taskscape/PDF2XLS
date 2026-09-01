@@ -121,7 +121,8 @@ class Program
             if (!inputResult.IsSuccess)
             {
                 Console.WriteLine(inputResult.ErrorMessage);
-                if (inputResult.FailureKind == InputPathFailureKind.EmptyDirectory)
+                if (inputResult.FailureKind is InputPathFailureKind.EmptyDirectory
+                    or InputPathFailureKind.AlreadySkipped)
                     Log.Warning("{Error}", inputResult.ErrorMessage);
                 else
                     Log.Error("Invalid input path: {Error}", inputResult.ErrorMessage);
